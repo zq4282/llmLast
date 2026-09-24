@@ -37,7 +37,7 @@
           <div class="call-field call-field--session">
             <label for="session-id">会话 ID</label>
             <div class="session-control__row">
-              <input id="session-id" name="session-id" type="text" maxlength="128" autocomplete="off" spellcheck="false" aria-describedby="session-help" value="CALL_001">
+              <input id="session-id" name="session-id" type="text" maxlength="128" autocomplete="off" spellcheck="false" aria-describedby="session-help">
               <button class="session-random-button" id="new-session" type="button" aria-label="生成新会话 ID" title="生成新会话 ID">
                 <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"/></svg>
                 <span>新会话</span>
@@ -138,7 +138,7 @@
 
     <footer class="footer">
       <p><span>LOCAL</span> · POST /api/chat · FastAPI + LangGraph</p>
-      <p>数据仅保存在当前服务进程内</p>
+      <p>会话状态保存在 Redis</p>
     </footer>
 
     <dialog class="command-dialog" id="command-dialog" aria-labelledby="command-title">

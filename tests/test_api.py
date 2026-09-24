@@ -174,5 +174,8 @@ def test_frontend_is_served() -> None:
     assert 'fetch("/api/chat"' in script.text
     assert "currentUserText" in script.text
     assert "crypto?.randomUUID" in script.text
+    assert "return window.crypto.randomUUID()" in script.text
+    assert "elements.session.value = createSessionId()" in script.text
+    assert "CALL_001" not in page.text
     assert tokens.status_code == 200
     assert "--color-accent" in tokens.text

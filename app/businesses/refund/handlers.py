@@ -14,13 +14,17 @@ def query_order(state: dict[str, Any]) -> ActionResult:
     """退款流程中的订单校验能力，也可被后续动作表直接引用。"""
 
     values = {**state.get("context", {}), **state.get("slots", {})}
+    call_info = state.get("call_info", {})
+
     query_params: dict[str, str] = {}
     if values.get("order_no"):
         query_params["order_no"] = str(values["order_no"])
-    if values.get("backup_phone"):
+    elif values.get("backup_phone"):
         query_params["phone"] = str(values["backup_phone"])
+    elif call_info.get("caller"):
+        query_params["phone"] = str(call_info["caller"])
 
-    # 由本轮 state 动态组装参数，实际调用形如 query_order(order_no=...)。
+    # 查询优先级：订单号 > 用户补充手机号 > 本次通话的主叫号码。
     order = order_api.query_order(**query_params)
     data = {
         key: value

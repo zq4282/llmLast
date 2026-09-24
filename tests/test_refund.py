@@ -152,6 +152,39 @@ def test_refund_asks_for_order_info_and_continues_with_phone(monkeypatch) -> Non
     assert third["out"] == "REFUND"
 
 
+def test_refund_queries_order_with_caller_from_call_info(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"task":"REFUND","confidence":0.97}',
+            '{"intent":"refund_request","confidence":0.93,'
+            '"slots":{"backup_phone":null,"order_no":null}}',
+        ]
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+
+    result = run_graph(
+        {
+            "session_id": "refund-caller-phone",
+            "message": "我要退款",
+            "history": [],
+            "business": None,
+            "plugin_state": None,
+            "route_task": None,
+            "route_locked": False,
+            "context": {},
+            "call_info": {
+                "caller": "17600184282",
+                "callee": "10000",
+                "call_start_time": "2026-09-24 10:00:00",
+            },
+        }
+    )
+
+    assert result["action_result"]["order_no"] == "ORD202405040004"
+    assert result["plugin_state"] == "CONFIRM_REFUND"
+    assert "19.9元" in result["reply"]
+
+
 def test_refund_keeps_asking_when_supplied_order_is_not_found(monkeypatch) -> None:
     model = SequenceClient(
         [
