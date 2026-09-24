@@ -54,7 +54,7 @@ prompt: |
   3. 用户说"退了吧/可以/好/行/同意"，当前状态是 CONFIRM_REFUND，判 affirm。
   4. 用户说"不用了/先不退/别退"，当前状态是 CONFIRM_REFUND，判 negate。
   5. 用户说"没有了/没了/没事了"，当前状态是 ASK_OTHER，判 end。
-  6. 用户说"15838996373"或"手机号是15838996373"，判 provide_info，slots.backup_phone=138xxxxxxxx。
+  6. 用户说"15838996373"或"手机号是15838996373"，判 provide_info，slots.backup_phone=15838996373。
   7. 用户说"订单号是ORD123"或"ORD123"，判 provide_info，slots.order_no=ORD123。
   8. 用户说"为什么扣钱/赶紧退/退我钱"，判 refund_request。
   9. 用户说"转人工/找客服/投诉"，判 human。
