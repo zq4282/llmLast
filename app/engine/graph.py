@@ -72,10 +72,10 @@ def router(state: ChatState) -> dict[str, Any]:
         }
 
     decision = intent_llm.classify_route(state["message"], state.get("history", []))
-    if decision.task in {ROUTE_TASK_UNKNOWN, DialogueOutput.HUMAN.value}:
+    if decision.task == ROUTE_TASK_UNKNOWN:
         return {
             "business": state.get("business") or "system",
-            "intent": "human" if decision.task == DialogueOutput.HUMAN.value else "unknown",
+            "intent": "unknown",
             "slots": {},
             "skip_understanding": True,
         }
@@ -145,7 +145,9 @@ def decide(state: ChatState) -> dict[str, Any]:
         "out": transition.out,
         "reply_source": ReplySource.TEMPLATE,
         "unrecognized_count": 0,
-        "handoff_reason": None,
+        "handoff_reason": (
+            "USER_REQUESTED" if transition.out == DialogueOutput.HUMAN else None
+        ),
     }
 
 

@@ -8,7 +8,7 @@ from app.engine.outputs import ALLOWED_OUTPUTS
 
 
 def test_all_plugins_are_loaded() -> None:
-    assert set(plugin_loader.load_all(force=True)) == {"refund"}
+    assert set(plugin_loader.load_all(force=True)) == {"human", "refund"}
 
 
 def test_external_outputs_are_limited_to_four_values() -> None:
@@ -51,6 +51,24 @@ def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:
     assert end_transition is not None
     assert end_transition.next_state == "END"
     assert end_transition.out == "END"
+
+
+def test_human_plugin_asks_reason_before_handoff() -> None:
+    plugin = plugin_loader.get("human")
+
+    assert plugin.states == ("IDLE", "ASK_REASON", "INSULT_WARNED", "END")
+    assert plugin.terminal_states == {"END"}
+    initial = plugin.transition_for("IDLE", "transfer_request")
+    assert initial is not None
+    assert initial.action == "none"
+    assert initial.next_state == "ASK_REASON"
+    assert initial.out == "CHAT"
+
+    with_reason = plugin.transition_for("ASK_REASON", "provide_info")
+    assert with_reason is not None
+    assert with_reason.action == "record_reason"
+    assert with_reason.next_state == "END"
+    assert with_reason.out == "HUMAN"
 
 
 def test_recovery_step_count_is_derived_from_config(tmp_path: Path) -> None:

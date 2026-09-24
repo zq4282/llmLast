@@ -91,6 +91,7 @@ def test_route_task_is_declared_by_plugin_instead_of_name_alias() -> None:
     loader.load_all(force=True)
 
     assert loader.get_by_route_task(" refund ").name == "refund"
+    assert loader.get_by_route_task(" human ").name == "human"
 
     with pytest.raises(PluginConfigError, match="没有可处理 Task BUSINESS_QA 的插件"):
         loader.get_by_route_task("BUSINESS_QA")

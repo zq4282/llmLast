@@ -187,8 +187,13 @@ def test_router_unknown_uses_recovery_without_loading_plugin(monkeypatch) -> Non
     assert result["out"] == "CHAT"
 
 
-def test_router_human_request_transfers_immediately(monkeypatch) -> None:
-    model = SequenceClient(['{"task":"HUMAN","confidence":0.99}'])
+def test_router_human_request_enters_reason_collection(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"task":"HUMAN","confidence":0.99}',
+            '{"intent":"transfer_request","confidence":0.98,"slots":{"reason":null}}',
+        ]
+    )
     monkeypatch.setattr(intent_llm, "client", model)
 
     result = run_graph(
@@ -203,6 +208,8 @@ def test_router_human_request_transfers_immediately(monkeypatch) -> None:
         }
     )
 
-    assert result["out"] == "HUMAN"
-    assert result["handoff_reason"] == "USER_REQUESTED"
+    assert result["business"] == "human"
+    assert result["plugin_state"] == "ASK_REASON"
+    assert result["out"] == "CHAT"
+    assert result["handoff_reason"] is None
     assert result["unrecognized_count"] == 0

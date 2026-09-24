@@ -1,0 +1,201 @@
+name: human
+route_task: HUMAN
+
+states:
+  - IDLE
+  - ASK_REASON
+  - INSULT_WARNED
+  - END
+
+terminal_states: [END]
+
+recovery:
+  unknown:
+    - reply: unknown_first
+      out: CHAT
+    - reply: unknown_second
+      out: CHAT
+    - reply: unknown_handoff
+      out: HUMAN
+  unsupported:
+    - reply: unsupported_first
+      out: CHAT
+    - reply: unsupported_second
+      out: CHAT
+    - reply: unsupported_handoff
+      out: HUMAN
+
+prompt: |
+  你是转人工客服的意图识别模块。你只负责理解用户说的话和抽取转人工原因，不负责回复用户，不决定是否转接，不调用任何工具，不输出对外动作。
+
+  当前状态：{state}
+  当前已记录信息：{context}
+  最近对话：
+  {history}
+  用户当前说：{user_input}
+
+  你的任务：
+  1. 结合最近对话和当前状态，判断用户当前这句话的意图。
+  2. 仅抽取用户明确说出的转人工原因。
+  3. 只输出 JSON，不要 Markdown，不要解释，不要输出 JSON 以外的任何内容。
+
+  意图范围：
+  - transfer_request：用户要求转人工、找客服、投诉，或在询问原因时要求直接转接。
+  - provide_info：用户在描述自己遇到的问题、诉求或情况。
+  - negate：用户表示不需要转人工了。
+  - end：用户表示没有其他问题或服务可以结束。
+  - insult：用户对客服、公司或他人进行明确辱骂、人身攻击或诅咒。
+  - unknown：乱码、随机字符、无意义重复，或结合上下文仍无法判断。
+
+  槽位定义：
+  - reason：用户描述的问题，用一句话简洁概括；用户未描述问题时必须为 null。
+
+  输出格式：
+  {
+    "intent": "transfer_request",
+    "confidence": 0.0,
+    "slots": {
+      "reason": null
+    }
+  }
+
+  判断规则：
+  1. 当前状态是 ASK_REASON 时，用户描述问题、抱怨或说明情况，判为 provide_info，并抽取 reason。
+  2. 当前状态是 ASK_REASON 时，用户说“你直接转吧/别问了/快点”，判为 transfer_request，reason 为 null。
+  3. 用户说“不用了/算了/不转了”，判为 negate。
+  4. 用户说“没有了/没事了”，判为 end。
+  5. 用户说“傻逼/垃圾公司/去死”等明确辱骂、人身攻击或诅咒内容，判为 insult。仅表达不满或抱怨问题、但没有辱骂内容时，不得判为 insult。
+  6. 用户没有明确描述问题时，不得编造 reason。
+  7. 不确定就输出 unknown，confidence 低于 0.6，不要猜。
+  8. 只判断是否存在辱骂，不要自行计算 insult_count，计数由程序完成。
+  9. 不要输出 CHAT、REFUND、HUMAN 或 END，这些由程序决定。
+
+  示例：
+  当前状态：IDLE
+  最近对话：（无）
+  用户：我要转人工
+  输出：{"intent":"transfer_request","confidence":0.97,"slots":{"reason":null}}
+
+  当前状态：ASK_REASON
+  最近对话：
+  用户：我要转人工
+  系统：好的，方便先简单说一下您遇到的问题吗？
+  用户：我上个月扣了两次费，账单不对
+  输出：{"intent":"provide_info","confidence":0.95,"slots":{"reason":"上个月被扣两次费"}}
+
+  当前状态：ASK_REASON
+  最近对话：
+  用户：我要转人工
+  系统：好的，方便先简单说一下您遇到的问题吗？
+  用户：你直接转吧，别问了
+  输出：{"intent":"transfer_request","confidence":0.94,"slots":{"reason":null}}
+
+  当前状态：IDLE
+  最近对话：（无）
+  用户：你们是不是傻逼
+  输出：{"intent":"insult","confidence":0.98,"slots":{"reason":null}}
+
+actions:
+  - state: IDLE
+    intent: transfer_request
+    do: none
+    reply: ask_reason
+    next: ASK_REASON
+    out: CHAT
+  - state: IDLE
+    intent: insult
+    do: record_insult
+    reply: insult_first
+    next: INSULT_WARNED
+    out: CHAT
+  - state: ASK_REASON
+    intent: insult
+    do: record_insult
+    reply: insult_first
+    next: INSULT_WARNED
+    out: CHAT
+  - state: ASK_REASON
+    intent: provide_info
+    do: record_reason
+    reply: transferring
+    next: END
+    out: HUMAN
+    on_error:
+      missing_reason:
+        reply: ask_reason_again
+        next: ASK_REASON
+        out: CHAT
+  - state: ASK_REASON
+    intent: transfer_request
+    do: none
+    reply: transferring_direct
+    next: END
+    out: HUMAN
+  - state: ASK_REASON
+    intent: negate
+    do: none
+    reply: cancel_transfer
+    next: END
+    out: CHAT
+  - state: ASK_REASON
+    intent: end
+    do: none
+    reply: end
+    next: END
+    out: CHAT
+  - state: INSULT_WARNED
+    intent: insult
+    do: record_insult
+    reply: insult_handoff
+    next: END
+    out: HUMAN
+  - state: INSULT_WARNED
+    intent: provide_info
+    do: record_reason
+    reply: transferring
+    next: END
+    out: HUMAN
+    on_error:
+      missing_reason:
+        reply: ask_reason_again
+        next: INSULT_WARNED
+        out: CHAT
+  - state: INSULT_WARNED
+    intent: transfer_request
+    do: none
+    reply: transferring_direct
+    next: END
+    out: HUMAN
+  - state: INSULT_WARNED
+    intent: negate
+    do: none
+    reply: cancel_transfer
+    next: END
+    out: CHAT
+  - state: INSULT_WARNED
+    intent: end
+    do: none
+    reply: end
+    next: END
+    out: CHAT
+
+templates:
+  ask_reason: "好的，为了更快帮您处理，方便先简单说一下您遇到的问题吗？"
+  ask_reason_again: "抱歉，我还没有记录到具体问题。请简单说明您遇到的情况，或说“直接转人工”。"
+  transferring: "明白了，您反馈的是{reason}。正在为您转接人工客服，请稍候。"
+  transferring_direct: "好的，正在为您转接人工客服，请稍候。"
+  cancel_transfer: "好的，如后续还有其他问题，随时告诉我。"
+  end: "感谢您的来电。"
+  insult_first: "非常抱歉给您带来不好的体验，我先帮您把问题处理好。请问您遇到的是什么情况？"
+  insult_handoff: "非常抱歉给您带来不好的体验，我马上为您转接人工客服，请稍候。"
+
+fallbacks:
+  human: "正在为您转接人工，请稍候。"
+  unknown: "抱歉，没太听明白，您能再说一遍吗？"
+  end: "本次服务已结束。"
+  unknown_first: "抱歉，我没听清您遇到的问题。请再简单说一遍，或说“直接转人工”。"
+  unknown_second: "抱歉，我还是没能理解。您可以再说一次，也可以直接说“转人工”。"
+  unknown_handoff: "还是没能理解您的意思，正在为您转接人工客服，请稍候。"
+  unsupported_first: "当前正在收集转人工原因。请简单说明您遇到的问题，或说“直接转人工”。"
+  unsupported_second: "请说明遇到的问题，或直接说“转人工”。"
+  unsupported_handoff: "当前流程无法继续处理，正在为您转接人工客服，请稍候。"

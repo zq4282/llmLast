@@ -7,7 +7,7 @@
 router → understand → decide → run_action → reply
 ```
 
-退款、查询、停机保号和兜底聊天均为 YAML 插件。新增业务时只需在
+退款和转人工流程均为 YAML 插件。新增业务时只需在
 `app/businesses/` 下增加 `plugin.yaml` 与 `handlers.py`，无需修改流程图。
 
 ## 运行
