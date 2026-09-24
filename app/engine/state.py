@@ -51,7 +51,7 @@ class ChatState(TypedDict, total=False):
     # ===== 会话恢复控制（跨轮共享） =====
     # 连续未理解或当前插件无法处理的次数；匹配有效业务动作后立即清零。
     unrecognized_count: int
-    # BOT/HANDOFF_PENDING/HUMAN/ENDED；人工接管后禁止再次进入机器人流程。
+    # BOT/HANDOFF_PENDING/ENDED；HUMAN 本轮返回后由 API 删除整个会话。
     conversation_status: str
     # 转人工原因，例如 USER_REQUESTED/CONSECUTIVE_UNRECOGNIZED/CONSECUTIVE_UNSUPPORTED。
     handoff_reason: str | None

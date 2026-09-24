@@ -94,11 +94,6 @@ def test_three_unknown_turns_escalate_and_keep_business_state(monkeypatch) -> No
     assert third["plugin_state"] == "CONFIRM_REFUND"
     assert third["context"]["order_no"] == "ORD202405010001"
 
-    waiting = run_graph(_next_turn(third, "喂"))
-    assert waiting["out"] == "HUMAN"
-    assert waiting["conversation_status"] == "HANDOFF_PENDING"
-    assert len(model.calls) == 3
-
 
 def test_recognized_intent_resets_unknown_count(monkeypatch) -> None:
     model = SequenceClient(

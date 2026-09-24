@@ -6,8 +6,6 @@ from typing import Any
 
 from app.engine.outputs import DialogueOutput
 
-ACTIVE_HANDOFF_STATUSES = frozenset({"HANDOFF_PENDING", "HUMAN"})
-
 SYSTEM_FALLBACKS = {
     "unknown_first": "抱歉，我没太听明白。您可以换一种说法，或补充一下具体需要办理什么。",
     "unknown_second": (
@@ -18,7 +16,6 @@ SYSTEM_FALLBACKS = {
         "还是没能理解您的意思，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
     ),
     "human_handoff": "正在为您转接人工客服，本次沟通记录已同步，请稍候。",
-    "human_waiting": "已为您申请转接人工客服，请稍候。",
     "unsupported_first": "当前流程无法处理这句话，请根据上一条提示重新回答。",
     "unsupported_second": (
         "当前流程仍无法处理您的回复。您可以按上一条提示回答，或直接说“转人工”；"
@@ -61,19 +58,8 @@ def recovery_decision(
 ) -> dict[str, Any] | None:
     """为未理解和人工接管生成统一决策；正常业务返回 None。"""
 
-    status = str(state.get("conversation_status", "BOT"))
     current_count = max(0, int(state.get("unrecognized_count", 0)))
     plugin_state = state.get("plugin_state")
-
-    if status in ACTIVE_HANDOFF_STATUSES:
-        return _decision(
-            reply_key="human_waiting",
-            out=DialogueOutput.HUMAN,
-            plugin_state=plugin_state,
-            count=current_count,
-            status=status,
-            reason=state.get("handoff_reason"),
-        )
 
     intent = state.get("intent")
     if intent == "human":

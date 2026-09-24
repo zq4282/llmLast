@@ -3,6 +3,9 @@
 from app.engine.outputs import DialogueOutput
 
 
+ROUTE_TASK_UNKNOWN = "UNKNOWN"
+
+
 ROUTE_TASK_DEFINITIONS = {
     DialogueOutput.REFUND.value: """明确要求退款、退费、撤销/退回已产生账单。
   - *典型表达*：退款 / 退钱（含ASR错字：退前、退狂） / 把198元退掉 / 取消这笔扣款。
@@ -12,7 +15,7 @@ ROUTE_TASK_DEFINITIONS = {
   - *边界*：仅表达“扣费质疑”（如“我没开过怎么扣了198”）但**未提及退款**，严禁推测其想退款，必须定为 BUSINESS_QA。""",
     DialogueOutput.HUMAN.value: """要求人工介入，或明确拒绝机器服务。
   - *典型表达*：转人工（含ASR错字：转仁工、抓人工） / 找人工客服 / 叫你们主管来 / 别跟我说了叫真人。""",
-    "UNKNOWN": """意图模糊、信息缺失严重、或单纯无实质业务指向的应答。
+    ROUTE_TASK_UNKNOWN: """意图模糊、信息缺失严重、或单纯无实质业务指向的应答。
   - *典型表达*：帮我处理下 / 这个怎么弄 / 不行 / 知道了 / 喂喂喂。""",
 }
 

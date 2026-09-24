@@ -9,11 +9,11 @@ from app.engine.llm import intent_llm
 from app.engine.loader import plugin_loader
 from app.engine.outputs import DialogueOutput
 from app.engine.recovery import (
-    ACTIVE_HANDOFF_STATUSES,
     SYSTEM_FALLBACKS,
     recovery_decision,
 )
 from app.engine.render import render_template
+from app.engine.route_tasks import ROUTE_TASK_UNKNOWN
 from app.engine.state import ChatState
 
 
@@ -63,18 +63,8 @@ def _recovery_for_state(
 def router(state: ChatState) -> dict[str, Any]:
     """首次由模型选插件；锁定后只读共享状态，不再调用顶层 Router 模型。"""
 
-    if state.get("conversation_status", "BOT") in ACTIVE_HANDOFF_STATUSES:
-        return {
-            "business": state.get("business") or "system",
-            "intent": "human",
-            "intent_confidence": 1.0,
-            "slots": {},
-            "skip_understanding": True,
-            "error": None,
-        }
-
     route_task = state.get("route_task")
-    if state.get("route_locked") and route_task and route_task != "UNKNOWN":
+    if state.get("route_locked") and route_task and route_task != ROUTE_TASK_UNKNOWN:
         existing_business = state.get("business")
         plugin = (
             plugin_loader.get(existing_business)
@@ -91,7 +81,7 @@ def router(state: ChatState) -> dict[str, Any]:
         }
 
     decision = intent_llm.classify_route(state["message"], state.get("history", []))
-    if decision.task in {"UNKNOWN", DialogueOutput.HUMAN.value}:
+    if decision.task in {ROUTE_TASK_UNKNOWN, DialogueOutput.HUMAN.value}:
         return {
             "business": state.get("business") or "system",
             "route_task": decision.task,
@@ -108,7 +98,7 @@ def router(state: ChatState) -> dict[str, Any]:
         "business": plugin.name,
         "route_task": decision.task,
         "route_confidence": decision.confidence,
-        "route_locked": decision.task != "UNKNOWN",
+        "route_locked": decision.task != ROUTE_TASK_UNKNOWN,
         "skip_understanding": False,
         "error": None,
     }
