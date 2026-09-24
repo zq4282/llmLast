@@ -1,0 +1,9 @@
+{
+  "scanned_at": "2026-09-24",
+  "framework": "FastAPI + vanilla HTML/CSS/JavaScript",
+  "font_stack": null,
+  "palette": null,
+  "motion": "motion-cut",
+  "spacing": null,
+  "preserved": ["existing FastAPI routes", "POST /api/chat"]
+}

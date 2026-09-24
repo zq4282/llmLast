@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="插件化对话引擎的本地测试工作台">
+    <title>对话引擎测试台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <a class="brand" href="/" aria-label="返回对话引擎测试台">
+          <span class="brand__mark" aria-hidden="true"></span>
+          <span>对话引擎</span>
+          <span class="brand__mode">TEST CONSOLE</span>
+        </a>
+        <button class="command-trigger" id="command-trigger" type="button" aria-haspopup="dialog">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+          <span>测试指令</span>
+          <kbd>⌘ K</kbd>
+        </button>
+        <a class="docs-link" href="/docs">API 文档</a>
+      </div>
+    </header>
+
+    <main class="workspace" id="workspace">
+      <section class="intro">
+        <div>
+          <h1>验证每一轮对话。</h1>
+          <p>发送真实请求，同时检查业务路由、意图、动作和返回数据。</p>
+        </div>
+        <div class="session-control">
+          <label for="session-id">会话 ID</label>
+          <div class="session-control__row">
+            <input id="session-id" name="session-id" type="text" autocomplete="off" spellcheck="false" aria-describedby="session-help">
+            <button class="icon-button" id="new-session" type="button" aria-label="新建会话" title="新建会话">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+          <p id="session-help">同一个 ID 会保留多轮上下文。</p>
+        </div>
+      </section>
+
+      <div class="workbench">
+        <section class="conversation" aria-labelledby="conversation-title">
+          <header class="panel-head">
+            <div>
+              <h2 id="conversation-title">对话</h2>
+              <p id="turn-count">尚未发送消息</p>
+            </div>
+            <span class="connection"><span aria-hidden="true"></span>API READY</span>
+          </header>
+
+          <div class="messages" id="messages" aria-live="polite" aria-relevant="additions">
+            <div class="empty-state" id="empty-state">
+              <div class="empty-state__glyph" aria-hidden="true">&gt;_</div>
+              <h3>从一条业务消息开始</h3>
+              <p>例如“我要退款”或“查询 2026 年 09 月账单”。多轮回复会保留在当前会话。</p>
+            </div>
+          </div>
+
+          <form class="composer" id="chat-form" novalidate>
+            <label for="message-input">用户消息</label>
+            <div class="composer__field">
+              <textarea id="message-input" name="message" rows="3" maxlength="4000" placeholder="输入退款、查询或停机保号请求" aria-describedby="message-help" required></textarea>
+              <div class="composer__meta">
+                <span id="message-help">Enter 发送 · Shift + Enter 换行</span>
+                <span id="character-count">0 / 4000</span>
+              </div>
+            </div>
+            <button class="send-button" id="send-button" type="submit">
+              <span class="send-button__label">发送请求</span>
+              <span class="send-button__loader" aria-hidden="true"></span>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 14-7-4 14-3-6-7-1Z"/></svg>
+            </button>
+          </form>
+        </section>
+
+        <aside class="inspector" aria-labelledby="inspector-title">
+          <header class="panel-head inspector__head">
+            <div>
+              <h2 id="inspector-title">引擎检查器</h2>
+              <p>最近一次响应</p>
+            </div>
+            <span class="latency" id="latency">— ms</span>
+          </header>
+
+          <dl class="route-data">
+            <div><dt>业务</dt><dd id="business-value">—</dd></div>
+            <div><dt>意图</dt><dd id="intent-value">—</dd></div>
+            <div><dt>动作</dt><dd id="action-value">—</dd></div>
+            <div><dt>会话</dt><dd id="response-session-value">—</dd></div>
+          </dl>
+
+          <div class="response-block">
+            <div class="response-block__head">
+              <span>RESPONSE.JSON</span>
+              <button class="copy-button" id="copy-response" type="button" disabled>
+                <span>复制 JSON</span>
+              </button>
+            </div>
+            <pre id="response-json" tabindex="0">{
+  "status": "waiting"
+}</pre>
+          </div>
+
+          <div class="trace-note">
+            <p>节点路径</p>
+            <code>router → understand → decide → execute → reply</code>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <p><span>LOCAL</span> · POST /api/chat · FastAPI + LangGraph</p>
+      <p>数据仅保存在当前服务进程内</p>
+    </footer>
+
+    <dialog class="command-dialog" id="command-dialog" aria-labelledby="command-title">
+      <div class="command-dialog__inner">
+        <div class="command-search">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+          <label class="sr-only" for="command-search">筛选测试指令</label>
+          <input id="command-search" type="search" placeholder="筛选测试指令" autocomplete="off">
+          <kbd>ESC</kbd>
+        </div>
+        <div class="command-list" id="command-list" role="listbox" aria-labelledby="command-title">
+          <p id="command-title">选择一条消息填入输入框</p>
+          <button class="command-item" type="button" role="option" data-prompt="我要申请退款">
+            <span>退款 · 第一步</span><code>我要申请退款</code>
+          </button>
+          <button class="command-item" type="button" role="option" data-prompt="订单号 A1001，因为买错了">
+            <span>退款 · 补充订单</span><code>A1001，因为买错了</code>
+          </button>
+          <button class="command-item" type="button" role="option" data-prompt="查询 2026 年 09 月账单">
+            <span>查询 · 账单</span><code>查询 2026 年 09 月账单</code>
+          </button>
+          <button class="command-item" type="button" role="option" data-prompt="办理停机保号">
+            <span>停机 · 第一步</span><code>办理停机保号</code>
+          </button>
+          <button class="command-item" type="button" role="option" data-prompt="13800138000，办理 3 个月">
+            <span>停机 · 补充号码</span><code>13800138000，办理 3 个月</code>
+          </button>
+        </div>
+        <div class="command-dialog__foot">
+          <span><kbd>↑</kbd><kbd>↓</kbd> 选择</span>
+          <span><kbd>↵</kbd> 填入</span>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

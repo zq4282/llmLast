@@ -1,0 +1,36 @@
+name: refund
+description: 订单退款与退款进度查询
+keywords: [退款, 退钱, 退款进度, 退款状态]
+default_intent: apply_refund
+
+intents:
+  apply_refund:
+    keywords: [退款, 退钱, 申请退款, 不想要]
+    action: submit_refund
+    slot_patterns:
+      order_id: '(?:订单(?:号)?|order(?:\s*id)?)?[：:\s#-]*(?P<value>[A-Za-z]\d{4,})'
+      reason: '(?:原因是|因为|理由[是：:]?)[\s]*(?P<value>[^，。,.]{2,40})'
+  query_refund_status:
+    keywords: [退款进度, 退款状态, 退款到哪]
+    action: query_refund
+    slot_patterns:
+      order_id: '(?:订单(?:号)?|order(?:\s*id)?)?[：:\s#-]*(?P<value>[A-Za-z]\d{4,})'
+
+actions:
+  submit_refund:
+    handler: handlers.submit_refund
+    required_slots: [order_id]
+    success_template: refund_submitted
+  query_refund:
+    handler: handlers.query_refund
+    required_slots: [order_id]
+    success_template: refund_status
+
+templates:
+  ask_order_id: 请提供需要退款的订单号，例如 A1001。
+  refund_submitted: '退款申请已提交：订单 {order_id}，退款金额 ¥{amount}，退款单号 {refund_id}，当前状态为 {status}。'
+  refund_status: '订单 {order_id} 的退款单 {refund_id} 当前状态为 {status}。'
+  error_order_not_found: '没有找到订单 {order_id}，请核对订单号后重试。'
+  error_already_refunded: '订单 {order_id} 已完成退款，无需重复申请。'
+  error_refund_not_found: '订单 {order_id} 暂无退款记录。'
+  error: 退款服务暂时不可用，请稍后重试。

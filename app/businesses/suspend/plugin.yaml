@@ -1,0 +1,23 @@
+name: suspend
+description: 手机号停机保号
+keywords: [停机, 保号, 暂停号码, 暂停服务]
+default_intent: suspend_number
+
+intents:
+  suspend_number:
+    keywords: [停机, 保号, 暂停]
+    action: suspend_number
+    slot_patterns:
+      phone: '(?P<value>1[3-9]\d{9})'
+      months: '(?P<value>\d{1,2})(?:个)?月'
+
+actions:
+  suspend_number:
+    handler: handlers.suspend_number
+    required_slots: [phone]
+    success_template: suspended
+
+templates:
+  ask_phone: 请提供需要办理停机保号的 11 位手机号。
+  suspended: '手机号 {phone} 已办理停机保号，期限 {months} 个月。'
+  error: 停机保号办理失败，请稍后重试。
