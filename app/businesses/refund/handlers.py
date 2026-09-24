@@ -1,5 +1,6 @@
-"""退款业务处理函数。"""
+"""退款插件动作；plugin.yaml 中配置的业务方法统一在此实现。"""
 
+from copy import deepcopy
 from typing import Any
 
 from app.engine.action_result import (
@@ -7,7 +8,161 @@ from app.engine.action_result import (
     action_failure,
     action_success,
 )
-from app.integrations import order_api, refund_api
+
+
+_ORDERS = {
+    "ORD202405010001": {
+        "order_no": "ORD202405010001",
+        "productName": "专业版年度会员订阅",
+        "payStatus": "支付成功",
+        "payTime": "2024-05-01 10:15:30",
+        "payAmount": 299.00,
+        "payMethod": "微信",
+        "refundStatus": "未退款",
+        "refundAmount": 0.00,
+        "refundTime": None,
+        "refundFailReason": None,
+        "subscriptionStatus": "订阅中",
+        "cancelTime": None,
+    },
+    "ORD202405020002": {
+        "order_no": "ORD202405020002",
+        "productName": "云存储扩容包 (100GB/月)",
+        "payStatus": "支付成功",
+        "payTime": "2024-05-02 14:20:10",
+        "payAmount": 15.00,
+        "payMethod": "支付宝",
+        "refundStatus": "退款成功",
+        "refundAmount": 15.00,
+        "refundTime": "2024-05-03 09:12:00",
+        "refundFailReason": None,
+        "subscriptionStatus": "已退订",
+        "cancelTime": "2024-05-03 09:10:00",
+    },
+    "ORD202405030003": {
+        "order_no": "ORD202405030003",
+        "productName": "高级团队版按月订阅",
+        "payStatus": "支付成功",
+        "payTime": "2024-05-03 16:45:00",
+        "payAmount": 99.00,
+        "payMethod": "微信",
+        "refundStatus": "退款失败",
+        "refundAmount": 0.00,
+        "refundTime": None,
+        "refundFailReason": "已超过7天无理由退款期限",
+        "subscriptionStatus": "已退订",
+        "cancelTime": "2024-05-15 11:30:22",
+    },
+    "ORD202405040004": {
+        "order_no": "ORD202405040004",
+        "productName": "基础会员连续包月",
+        "payStatus": "支付失败",
+        "payTime": None,
+        "payAmount": 19.90,
+        "payMethod": "支付宝",
+        "refundStatus": "未退款",
+        "refundAmount": 0.00,
+        "refundTime": None,
+        "refundFailReason": None,
+        "subscriptionStatus": "已退订",
+        "cancelTime": None,
+    },
+}
+
+_PHONE_ORDERS = {
+    "13800138000": {
+        "ORD202405030009": {
+            "order_no": "ORD202405030003",
+            "productName": "高级团队版按月订阅",
+            "payStatus": "支付成功",
+            "payTime": "2024-05-03 16:45:00",
+            "payAmount": 99.00,
+            "payMethod": "微信",
+            "refundStatus": "未退款",
+            "refundAmount": 0.00,
+            "refundTime": None,
+            "refundFailReason": "已超过7天无理由退款期限",
+            "subscriptionStatus": "订阅中",
+            "cancelTime": "2024-05-15 11:30:22",
+        },
+        "ORD202405040008": {
+            "order_no": "ORD202405040004",
+            "productName": "基础会员连续包月",
+            "payStatus": "支付成功",
+            "payTime": "2024-05-03 16:45:00",
+            "payAmount": 19.90,
+            "payMethod": "支付宝",
+            "refundStatus": "未退款",
+            "refundAmount": 0.00,
+            "refundTime": None,
+            "refundFailReason": None,
+            "subscriptionStatus": "订阅中",
+            "cancelTime": None,
+        },
+    }
+}
+
+
+def _normalize_order(order: dict[str, Any]) -> dict[str, Any]:
+    raw = deepcopy(order)
+    refund_status = raw.get("refundStatus")
+    pay_status = raw.get("payStatus")
+    if refund_status == "退款成功":
+        status = "refunded"
+    elif pay_status == "支付成功":
+        status = "paid"
+    else:
+        status = "unpaid"
+    return {
+        "ok": True,
+        "order_no": raw.get("order_no"),
+        "merchant": raw.get("productName"),
+        "amount": raw.get("payAmount"),
+        "status": status,
+        "pay_status": pay_status,
+        "pay_time": raw.get("payTime"),
+        "pay_method": raw.get("payMethod"),
+        "refund_status": refund_status,
+        "refund_amount": raw.get("refundAmount"),
+        "refund_time": raw.get("refundTime"),
+        "refund_fail_reason": raw.get("refundFailReason"),
+        "subscription_status": raw.get("subscriptionStatus"),
+        "cancel_time": raw.get("cancelTime"),
+    }
+
+
+def _find_order(
+    *,
+    order_no: str | None = None,
+    phone: str | None = None,
+) -> dict[str, Any]:
+    if order_no:
+        normalized_order_no = order_no.strip().upper()
+        order = _ORDERS.get(normalized_order_no)
+        if order is None:
+            return {
+                "ok": False,
+                "error": "order_not_found",
+                "order_no": normalized_order_no,
+            }
+        return _normalize_order(order)
+
+    if phone:
+        normalized_phone = "".join(character for character in phone if character.isdigit())
+        orders = _PHONE_ORDERS.get(normalized_phone)
+        if not orders:
+            return {
+                "ok": False,
+                "error": "order_not_found",
+                "phone": normalized_phone,
+            }
+        _, latest_order = max(
+            orders.items(),
+            key=lambda item: (str(item[1].get("payTime") or ""), item[0]),
+        )
+        return _normalize_order(latest_order)
+
+    return {"ok": False, "error": "missing_order_query"}
 
 
 def query_order(state: dict[str, Any]) -> ActionResult:
@@ -25,7 +180,7 @@ def query_order(state: dict[str, Any]) -> ActionResult:
         query_params["phone"] = str(call_info["caller"])
 
     # 查询优先级：订单号 > 用户补充手机号 > 本次通话的主叫号码。
-    order = order_api.query_order(**query_params)
+    order = _find_order(**query_params)
     data = {
         key: value
         for key, value in order.items()
@@ -38,29 +193,11 @@ def query_order(state: dict[str, Any]) -> ActionResult:
 
 
 def submit_refund(state: dict[str, Any]) -> ActionResult:
+    """组装退款提交参数；实际退款由调用方后续执行。"""
+
     values = {**state.get("context", {}), **state.get("slots", {})}
-    order_no = values.get("order_no")
-    if not order_no:
-        return action_failure("missing_order_no")
-    result = refund_api.submit_refund(order_no.upper(), values.get("reason", "用户申请"))
-    data = {
-        key: value
-        for key, value in result.items()
-        if key not in {"ok", "error"}
+    refund_params = {
+        "order_no": str(values["order_no"]).upper(),
+        "reason": str(values.get("reason") or "用户申请"),
     }
-    if not result.get("ok"):
-        return action_failure(str(result.get("error", "internal_error")), **data)
-    data.setdefault("eta", "1到3个工作日")
-    return action_success(**data)
-
-
-def query_refund(state: dict[str, Any]) -> ActionResult:
-    result = refund_api.query_refund(state["slots"]["order_no"].upper())
-    data = {
-        key: value
-        for key, value in result.items()
-        if key not in {"ok", "error"}
-    }
-    if not result.get("ok"):
-        return action_failure(str(result.get("error", "internal_error")), **data)
-    return action_success(**data)
+    return action_success(**refund_params, eta="1到3个工作日")

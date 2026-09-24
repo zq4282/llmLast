@@ -11,8 +11,7 @@ def test_redis_store_round_trips_state_and_refreshes_ttl() -> None:
         ttl_seconds=600,
     )
 
-    # fakeredis 默认不实现 redis-py Lock 释放时使用的 EVALSHA；锁由真实 Redis
-    # 集成验证，这里只验证会话序列化、租户隔离和 TTL。
+    # 验证会话序列化、历史字段清理和 TTL。
     session_key = "test-llmlast:session:7:session-1"
     client.hset(
         session_key,

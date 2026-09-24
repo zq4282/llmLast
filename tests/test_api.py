@@ -175,6 +175,9 @@ def test_frontend_is_served() -> None:
     assert "crypto?.randomUUID" in script.text
     assert "return window.crypto.randomUUID()" in script.text
     assert "elements.session.value = createSessionId()" in script.text
+    assert 'new Set(["HUMAN", "END"])' in script.text
+    assert "elements.input.disabled = isTerminal" in script.text
+    assert "当前会话已结束，请点击“新建会话”后继续" in script.text
     assert "CALL_001" not in page.text
     assert tokens.status_code == 200
     assert "--color-accent" in tokens.text

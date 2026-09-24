@@ -59,20 +59,18 @@ curl -X POST http://127.0.0.1:8000/api/chat \
 uv run pytest
 ```
 
-`app/integrations/` 当前提供确定性的本地模拟实现。生产环境可保持函数契约不变，
-替换为订单、退款、账户、短信和 LLM 的真实 HTTP/SDK 调用。
+`plugin.yaml` 中 `do` 配置的业务动作统一实现在同插件目录的 `handlers.py` 中，
+不再通过额外的业务接口文件转调。生产环境可在这些 Handler 内按需接入真实服务。
 
 ## Redis 会话状态
 
 生产环境默认使用 Redis 保存跨轮会话状态，并按 `tenantId + sessionId` 隔离数据。
-同一个会话的一整轮处理由 Redis 分布式锁串行化，状态每次写入后刷新 TTL。
+状态每次写入后刷新 TTL；请求本身不在本服务内加锁。
 
 ```bash
 REDIS_URL=redis://127.0.0.1:6379/0
 SESSION_KEY_PREFIX=llmlast
 SESSION_TTL_SECONDS=86400
-SESSION_LOCK_TIMEOUT_SECONDS=30
-SESSION_LOCK_BLOCKING_TIMEOUT_SECONDS=5
 ```
 
 Redis 不可用时应用启动失败或聊天接口返回 503，不会静默降级到进程内存。

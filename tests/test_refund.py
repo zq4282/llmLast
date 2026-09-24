@@ -1,6 +1,6 @@
+from app.businesses.refund.handlers import submit_refund
 from app.engine.graph import run_graph
 from app.engine.llm import intent_llm
-from app.integrations import refund_api
 
 
 class SequenceClient:
@@ -13,14 +13,20 @@ class SequenceClient:
         return self.responses.pop(0)
 
 
-def test_refund_api_uses_order_no_everywhere() -> None:
-    submitted = refund_api.submit_refund("ORD202405030003")
-    queried = refund_api.query_refund("ORD202405030003")
+def test_submit_refund_only_builds_parameters() -> None:
+    result = submit_refund(
+        {
+            "context": {"order_no": "ord202405010001"},
+            "slots": {"reason": "用户确认退款"},
+        }
+    )
 
-    assert submitted["order_no"] == "ORD202405030003"
-    assert queried["order_no"] == "ORD202405030003"
-    assert "order_id" not in submitted
-    assert "order_id" not in queried
+    assert result == {
+        "ok": True,
+        "order_no": "ORD202405010001",
+        "reason": "用户确认退款",
+        "eta": "1到3个工作日",
+    }
 
 
 def test_refund_state_machine_runs_across_turns(monkeypatch) -> None:

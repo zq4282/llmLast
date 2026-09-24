@@ -41,6 +41,7 @@ const DEFAULTS = {
   systemPrompt: "你是会员业务客服，请识别用户意图并生成回复话术",
   config: { maxReplyLen: 60, temperature: 0.1 },
 };
+const TERMINAL_OUTPUTS = new Set(["HUMAN", "END"]);
 
 const createSessionId = () => {
   if (window.crypto?.randomUUID) {
@@ -86,10 +87,25 @@ elements.session.value = createSessionId();
 
 function setSending(isSending) {
   state.loading = isSending;
-  elements.send.disabled = isSending;
-  elements.send.dataset.state = isSending ? "loading" : "default";
-  elements.sendLabel.textContent = isSending ? "请求处理中" : "发送请求";
+  elements.send.disabled = isSending || state.terminal;
+  elements.send.dataset.state = isSending ? "loading" : state.terminal ? "terminal" : "default";
+  elements.sendLabel.textContent = isSending
+    ? "请求处理中"
+    : state.terminal
+      ? "会话已结束"
+      : "发送请求";
   elements.input.setAttribute("aria-busy", String(isSending));
+}
+
+function setTerminal(isTerminal) {
+  state.terminal = isTerminal;
+  elements.input.disabled = isTerminal;
+  elements.send.disabled = state.loading || isTerminal;
+  elements.send.dataset.state = isTerminal ? "terminal" : "default";
+  elements.sendLabel.textContent = isTerminal ? "会话已结束" : "发送请求";
+  elements.help.textContent = isTerminal
+    ? "当前会话已结束，请点击“新建会话”后继续。"
+    : "Enter 发送 · Shift + Enter 换行";
 }
 
 function formatTime() {
@@ -140,13 +156,7 @@ function setInputError(message) {
 }
 
 async function sendMessage(message) {
-  if (state.terminal) {
-    elements.session.value = createSessionId();
-    state.turns = 0;
-    state.history = [];
-    state.callStartTime = formatDateTime();
-    state.terminal = false;
-  }
+  if (state.terminal) return;
   const sessionId = elements.session.value.trim() || createSessionId();
   elements.session.value = sessionId;
   setSending(true);
@@ -189,15 +199,15 @@ async function sendMessage(message) {
       aiText: payload.reply,
       time: requestTime,
     });
-    if (payload.out === "HUMAN" || payload.out === "END") {
-      // 保留终态回复供用户查看；下一次发送时换新 sessionId，且不携带旧历史。
+    if (TERMINAL_OUTPUTS.has(payload.out)) {
+      // 保留终态回复供查看；锁定输入，只有显式新建会话后才能继续发送。
       state.history = [];
-      state.terminal = true;
+      setTerminal(true);
     }
     updateInspector(payload, elapsed);
     elements.input.value = "";
     elements.count.textContent = "0 / 4000";
-    elements.input.focus();
+    (state.terminal ? elements.newSession : elements.input).focus();
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "无法连接到聊天接口";
     addMessage("error", `${messageText}。请确认服务仍在运行，然后重试。`);
@@ -212,6 +222,7 @@ async function sendMessage(message) {
 
 elements.form.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (state.terminal) return;
   const message = elements.input.value.trim();
   if (!message) {
     setInputError("消息为空。输入一条业务请求后再发送。");
@@ -243,7 +254,7 @@ elements.session.addEventListener("change", () => {
   state.turns = 0;
   state.history = [];
   state.callStartTime = formatDateTime();
-  state.terminal = false;
+  setTerminal(false);
   elements.turnCount.textContent = "尚未发送消息";
 });
 
@@ -252,7 +263,7 @@ elements.newSession.addEventListener("click", () => {
   state.turns = 0;
   state.response = null;
   state.history = [];
-  state.terminal = false;
+  setTerminal(false);
   state.callStartTime = formatDateTime();
   elements.messages.replaceChildren();
   const empty = document.createElement("div");

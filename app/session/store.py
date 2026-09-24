@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from threading import RLock
 from time import time
-from typing import Any, ContextManager, Iterator, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import redis
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from redis.exceptions import LockError, RedisError
+from redis.exceptions import RedisError
 
 
 _OBSOLETE_SESSION_FIELDS = (
@@ -28,10 +27,6 @@ _OBSOLETE_SESSION_FIELDS = (
 
 class SessionStoreError(RuntimeError):
     """会话存储不可用或读写失败。"""
-
-
-class SessionBusyError(SessionStoreError):
-    """同一会话已有一轮请求在处理中。"""
 
 
 @dataclass
@@ -63,8 +58,6 @@ class SessionStore(Protocol):
         unrecognized_count: int = 0,
     ) -> None: ...
 
-    def lock(self, session_id: str, *, tenant_id: int = 1002) -> ContextManager[None]: ...
-
     def ping(self) -> None: ...
 
 
@@ -74,7 +67,6 @@ class MemorySessionStore:
     def __init__(self, max_history: int = 20) -> None:
         self._sessions: dict[str, Session] = {}
         self._guard = RLock()
-        self._session_locks: dict[str, RLock] = {}
         self._max_history = max_history
 
     @staticmethod
@@ -89,7 +81,6 @@ class MemorySessionStore:
     def delete(self, session_id: str, *, tenant_id: int = 1002) -> None:
         key = self._key(session_id, tenant_id)
         with self._guard:
-            # 当前调用仍持有该会话锁，不能在这里移除锁对象，否则并发请求可能绕过互斥。
             self._sessions.pop(key, None)
 
     def save(
@@ -120,25 +111,16 @@ class MemorySessionStore:
                 unrecognized_count=unrecognized_count,
             )
 
-    @contextmanager
-    def lock(self, session_id: str, *, tenant_id: int = 1002) -> Iterator[None]:
-        key = self._key(session_id, tenant_id)
-        with self._guard:
-            session_lock = self._session_locks.setdefault(key, RLock())
-        with session_lock:
-            yield
-
     def ping(self) -> None:
         return None
 
     def clear(self) -> None:
         with self._guard:
             self._sessions.clear()
-            self._session_locks.clear()
 
 
 class RedisSessionStore:
-    """使用 Redis Hash、TTL 和分布式锁保存会话。"""
+    """使用 Redis Hash 和 TTL 保存会话。"""
 
     def __init__(
         self,
@@ -146,23 +128,16 @@ class RedisSessionStore:
         *,
         key_prefix: str = "llmlast",
         ttl_seconds: int = 86400,
-        lock_timeout_seconds: int = 30,
-        lock_blocking_timeout_seconds: float = 5.0,
         max_history: int = 20,
         client: redis.Redis | None = None,
     ) -> None:
         self._client = client or redis.Redis.from_url(url, decode_responses=True)
         self._key_prefix = key_prefix.strip(":")
         self._ttl_seconds = ttl_seconds
-        self._lock_timeout_seconds = lock_timeout_seconds
-        self._lock_blocking_timeout_seconds = lock_blocking_timeout_seconds
         self._max_history = max_history
 
     def _key(self, session_id: str, tenant_id: int) -> str:
         return f"{self._key_prefix}:session:{tenant_id}:{session_id}"
-
-    def _lock_key(self, session_id: str, tenant_id: int) -> str:
-        return f"{self._key_prefix}:session-lock:{tenant_id}:{session_id}"
 
     def get(self, session_id: str, *, tenant_id: int = 1002) -> Session:
         try:
@@ -235,28 +210,6 @@ class RedisSessionStore:
         except RedisError as exc:
             raise SessionStoreError("保存 Redis 会话失败") from exc
 
-    @contextmanager
-    def lock(self, session_id: str, *, tenant_id: int = 1002) -> Iterator[None]:
-        redis_lock = self._client.lock(
-            self._lock_key(session_id, tenant_id),
-            timeout=self._lock_timeout_seconds,
-            blocking_timeout=self._lock_blocking_timeout_seconds,
-        )
-        try:
-            acquired = redis_lock.acquire(blocking=True)
-        except RedisError as exc:
-            raise SessionStoreError("获取 Redis 会话锁失败") from exc
-        if not acquired:
-            raise SessionBusyError("当前会话正在处理上一条消息，请稍后重试")
-        try:
-            yield
-        finally:
-            try:
-                if redis_lock.owned():
-                    redis_lock.release()
-            except (RedisError, LockError) as exc:
-                raise SessionStoreError("释放 Redis 会话锁失败") from exc
-
     def ping(self) -> None:
         try:
             self._client.ping()
@@ -281,8 +234,6 @@ class SessionSettings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     session_key_prefix: str = "llmlast"
     session_ttl_seconds: int = Field(default=86400, ge=60)
-    session_lock_timeout_seconds: int = Field(default=30, ge=5)
-    session_lock_blocking_timeout_seconds: float = Field(default=5.0, gt=0)
     session_max_history: int = Field(default=20, ge=2)
 
 
@@ -294,8 +245,6 @@ def build_session_store(settings: SessionSettings | None = None) -> MemorySessio
         settings.redis_url,
         key_prefix=settings.session_key_prefix,
         ttl_seconds=settings.session_ttl_seconds,
-        lock_timeout_seconds=settings.session_lock_timeout_seconds,
-        lock_blocking_timeout_seconds=settings.session_lock_blocking_timeout_seconds,
         max_history=settings.session_max_history,
     )
 

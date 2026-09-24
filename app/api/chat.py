@@ -8,7 +8,7 @@ from app.engine.graph import run_graph
 from app.engine.outputs import DialogueOutput, TERMINAL_OUTPUTS
 from app.integrations.llm_api import LLMAPIError
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.session.store import SessionBusyError, SessionStoreError, session_store
+from app.session.store import SessionStoreError, session_store
 
 
 router = APIRouter(tags=["chat"])
@@ -19,17 +19,14 @@ logger = logging.getLogger(__name__)
 def chat(request: ChatRequest) -> ChatResponse:
     session_id = request.resolved_session_id()
     try:
-        with session_store.lock(session_id, tenant_id=request.tenant_id):
-            return _chat_locked(request, session_id)
-    except SessionBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _chat(request, session_id)
     except SessionStoreError as exc:
         logger.exception("会话存储失败: %s", exc)
         raise HTTPException(status_code=503, detail="会话存储暂时不可用") from exc
 
 
-def _chat_locked(request: ChatRequest, session_id: str) -> ChatResponse:
-    """在同一会话的分布式锁内完成一次完整的读取、决策和保存。"""
+def _chat(request: ChatRequest, session_id: str) -> ChatResponse:
+    """完成一次会话读取、决策和保存。"""
 
     session = session_store.get(session_id, tenant_id=request.tenant_id)
     request_history = request.engine_history()

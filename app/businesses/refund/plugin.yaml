@@ -149,15 +149,6 @@ actions:
     reply: done
     next: ASK_OTHER
     out: REFUND
-    on_error:
-      already_refunded:
-        reply: already_done
-        next: ASK_OTHER
-        out: CHAT
-      order_not_found:
-        reply: ask_order_info
-        next: ASK_ORDER_INFO
-        out: CHAT
   - state: CONFIRM_REFUND
     intent: negate
     do: none
