@@ -20,9 +20,9 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         [
             '{"task":"REFUND","confidence":0.97}',
             '{"intent":"refund_request","confidence":0.93,'
-            '"slots":{"backup_phone":null,"order_id":null}}',
+            '"slots":{"backup_phone":null,"order_no":null}}',
             '{"intent":"affirm","confidence":0.95,'
-            '"slots":{"backup_phone":null,"order_id":null}}',
+            '"slots":{"backup_phone":null,"order_no":null}}',
         ]
     )
     monkeypatch.setattr(intent_llm, "client", model)
@@ -45,7 +45,7 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         assert body["intent"] == "affirm"
         assert body["action"] == "submit_refund"
         assert body["out"] == "REFUND"
-        assert body["data"]["order_id"] == "A1001"
+        assert body["data"]["order_no"] == "A1001"
         assert len(model.calls) == 3
         assert sum(call[0]["role"] == "system" for call in model.calls) == 1
 

@@ -1,10 +1,9 @@
 name: refund
-keywords: ["退", "扣", "退钱", "为什么扣"]
 
 states:
   - IDLE
   - CONFIRM_REFUND
-  - ASK_PHONE
+  - ASK_ORDER_INFO
   - ASK_OTHER
   - END
 
@@ -36,7 +35,7 @@ prompt: |
 
   槽位定义：
   - backup_phone：用户说的手机号，11 位数字，没有则 null。
-  - order_id：用户说的订单号，没有则 null。
+  - order_no：用户说的订单号，没有则 null。
 
   输出格式：
   {
@@ -44,7 +43,7 @@ prompt: |
     "confidence": 0.0,
     "slots": {
       "backup_phone": null,
-      "order_id": null
+      "order_no": null
     }
   }
 
@@ -54,8 +53,8 @@ prompt: |
   3. 用户说"退了吧/可以/好/行/同意"，当前状态是 CONFIRM_REFUND，判 affirm。
   4. 用户说"不用了/先不退/别退"，当前状态是 CONFIRM_REFUND，判 negate。
   5. 用户说"没有了/没了/没事了"，当前状态是 ASK_OTHER，判 end。
-  6. 用户说"138xxxxxxxx"或"手机号是138xxxxxxxx"，判 provide_info，slots.backup_phone=138xxxxxxxx。
-  7. 用户说"订单号是ORD123"或"ORD123"，判 provide_info，slots.order_id=ORD123。
+  6. 用户说"15838996373"或"手机号是15838996373"，判 provide_info，slots.backup_phone=138xxxxxxxx。
+  7. 用户说"订单号是ORD123"或"ORD123"，判 provide_info，slots.order_no=ORD123。
   8. 用户说"为什么扣钱/赶紧退/退我钱"，判 refund_request。
   9. 用户说"转人工/找客服/投诉"，判 human。
   10. 不要编造手机号、订单号、金额、时间，用户没说的槽位一律 null。
@@ -67,21 +66,27 @@ prompt: |
   当前状态：IDLE
   最近对话：（无）
   用户：为什么扣我钱，赶紧退过来
-  输出：{"intent":"refund_request","confidence":0.93,"slots":{"backup_phone":null,"order_id":null}}
+  输出：{"intent":"refund_request","confidence":0.93,"slots":{"backup_phone":null,"order_no":null}}
 
   当前状态：CONFIRM_REFUND
   最近对话：
   用户：为什么扣我钱？
   系统：查到您一笔 29.9 元扣款，是否退款？
   用户：就是那笔
-  输出：{"intent":"affirm","confidence":0.95,"slots":{"backup_phone":null,"order_id":null}}
+  输出：{"intent":"affirm","confidence":0.95,"slots":{"backup_phone":null,"order_no":null}}
 
   当前状态：ASK_OTHER
   最近对话：
   用户：退了吧
   系统：已提交退款，还有其他疑问吗？
   用户：没有了
-  输出：{"intent":"end","confidence":0.97,"slots":{"backup_phone":null,"order_id":null}}
+  输出：{"intent":"end","confidence":0.97,"slots":{"backup_phone":null,"order_no":null}}
+
+  当前状态：ASK_ORDER_INFO
+  最近对话：
+  系统：暂未查到可退款订单，请提供下单手机号或订单号。
+  用户：手机号是 13800138000
+  输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"13800138000","order_no":null}}
 
 actions:
   - state: IDLE
@@ -90,12 +95,22 @@ actions:
     reply: confirm
     next: CONFIRM_REFUND
     out: CHAT
-  - state: ASK_PHONE
+    on_error:
+      order_not_found:
+        reply: ask_order_info
+        next: ASK_ORDER_INFO
+        out: CHAT
+  - state: ASK_ORDER_INFO
     intent: provide_info
     do: query_order
     reply: confirm
     next: CONFIRM_REFUND
     out: CHAT
+    on_error:
+      order_not_found:
+        reply: retry_order_info
+        next: ASK_ORDER_INFO
+        out: CHAT
   - state: CONFIRM_REFUND
     intent: affirm
     do: submit_refund
@@ -122,10 +137,12 @@ actions:
     out: CHAT
 
 templates:
-  confirm: "我查到您有一笔 {amount} 元在 {merchant} 的扣款，是否需要为您申请退款？"
-  done: "已为您提交退款，预计 {eta} 到账，具体到账时间以账单为准。请问还有其他疑问吗？"
+  confirm: "我查到您有一笔{amount}元在{merchant}的扣款，是否需要为您申请退款？"
+  ask_order_info: "暂未查到可退款订单，请提供下单手机号或订单号，我再为您查询。"
+  retry_order_info: "根据您提供的信息仍未查到订单，请核对后重新提供手机号或订单号。"
+  done: "已为您提交退款，预计{eta}到账，具体到账时间以账单为准。请问还有其他疑问吗？"
   cancel: "已取消退款，还有其他问题吗？"
-  already_done: "这笔退款已经提交过了，预计 {eta} 到账，您可以在账单里查看。"
+  already_done: "这笔退款已经提交过了，预计{eta}到账，您可以在账单里查看。"
   end: "感谢您的来电，祝您生活愉快。"
 
 fallbacks:

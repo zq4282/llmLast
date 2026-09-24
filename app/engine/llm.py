@@ -10,7 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.engine.loader import Plugin
 from app.integrations.llm_api import LLMAPIError, OpenAICompatibleClient
 
-
 TASKS = {"REFUND", "BUSINESS_QA", "TRANSFER_HUMAN", "UNKNOWN"}
 
 TASK_ROUTER_PROMPT = """# Role
@@ -112,9 +111,9 @@ class IntentLLM:
         return self._route_with_llm(message, history)
 
     def _route_with_llm(
-        self,
-        message: str,
-        history: list[dict[str, str]],
+            self,
+            message: str,
+            history: list[dict[str, str]],
     ) -> RouteDecision:
         previous_assistant = next(
             (item.get("content", "") for item in reversed(history) if item.get("role") == "assistant"),
@@ -153,24 +152,24 @@ class IntentLLM:
         return data
 
     def understand(
-        self,
-        message: str,
-        plugin: Plugin,
-        plugin_state: str,
-        context: dict[str, Any],
-        history: list[dict[str, str]],
+            self,
+            message: str,
+            plugin: Plugin,
+            plugin_state: str,
+            context: dict[str, Any],
+            history: list[dict[str, str]],
     ) -> IntentDecision:
         if self.client is None:
             raise LLMAPIError("未配置 LLM_API_KEY，无法执行插件意图识别")
         return self._understand_with_llm(message, plugin, plugin_state, context, history)
 
     def _understand_with_llm(
-        self,
-        message: str,
-        plugin: Plugin,
-        plugin_state: str,
-        context: dict[str, Any],
-        history: list[dict[str, str]],
+            self,
+            message: str,
+            plugin: Plugin,
+            plugin_state: str,
+            context: dict[str, Any],
+            history: list[dict[str, str]],
     ) -> IntentDecision:
         history_text = "\n".join(
             f"{'系统' if item.get('role') == 'assistant' else '用户'}：{item.get('content', '')}"
@@ -185,6 +184,8 @@ class IntentLLM:
         }
         for placeholder, value in replacements.items():
             prompt = prompt.replace(placeholder, value)
+
+        print(plugin.name + " 提示词\n" + prompt)
         content = self.client.chat([{"role": "user", "content": prompt}])
         if not isinstance(content, str):
             raise LLMAPIError(f"插件 {plugin.name} 模型返回了非文本内容")
@@ -205,5 +206,6 @@ class IntentLLM:
             raise LLMAPIError(f"插件 {plugin.name} 模型返回非法 confidence: {confidence!r}")
         explicit_slots = {str(key): value for key, value in slots.items() if value is not None}
         return IntentDecision(intent, round(confidence, 2), explicit_slots)
+
 
 intent_llm = IntentLLM()

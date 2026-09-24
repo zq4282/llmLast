@@ -57,7 +57,7 @@ def test_understand_renders_prompt_from_state_machine_plugin() -> None:
     classifier = IntentLLM()
     client = FakeClient(
         '{"intent":"affirm","confidence":0.95,'
-        '"slots":{"backup_phone":null,"order_id":null}}'
+        '"slots":{"backup_phone":null,"order_no":null}}'
     )
     classifier.client = client
     plugin = plugin_loader.load_all(force=True)["refund"]

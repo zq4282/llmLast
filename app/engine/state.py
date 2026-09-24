@@ -35,9 +35,9 @@ class ChatState(TypedDict, total=False):
     intent: str
     # 【可选】插件内意图置信度，仅用于观测，删除不影响流程。
     intent_confidence: float
-    # 【本轮需要】本轮模型抽取并与上下文合并后的槽位，execute 使用。
+    # 【本轮需要】本轮模型新抽取的槽位；execute 会按需与 context 合并。
     slots: dict[str, Any]
-    # 【跨轮必需】已累积的槽位和 API 结果，例如 order_id/amount/merchant。
+    # 【跨轮必需】已累积的槽位和 API 结果，例如 order_no/amount/merchant。
     context: dict[str, Any]
 
     # ===== 动作表决策（单轮临时） =====
@@ -45,7 +45,7 @@ class ChatState(TypedDict, total=False):
     action: str | None
     # 【必需】actions.reply 或 fallback key，reply 节点用它选话术。
     reply_key: str
-    # 【必需】actions.next；reply 成功后写回 plugin_state。
+    # 【必需】actions.next；reply 成功后写回 plugin_state，失败时可由 on_error 覆盖。
     next_plugin_state: str
     # 【必需】actions.out，对外标识 CHAT/REFUND/HUMAN。
     out: str

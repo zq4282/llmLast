@@ -8,6 +8,11 @@ _ORDERS = {
     "A1002": {"order_id": "A1002", "amount": 29.9, "status": "refunded", "item": "流量包"},
 }
 
+_PHONE_ORDERS = {
+    "13800138000": "A1001",
+    "13900139000": "A1002",
+}
+
 
 def query_order(order_id: str) -> dict:
     """查询订单；未知订单返回明确的 not_found 状态。"""
@@ -23,3 +28,13 @@ def query_current_order() -> dict:
     """模拟按来电账户查询最近一笔可退订单。"""
 
     return {"ok": True, **deepcopy(_ORDERS["A1001"])}
+
+
+def query_order_by_phone(phone: str) -> dict:
+    """按下单手机号查询最近一笔订单。"""
+
+    normalized = "".join(character for character in phone if character.isdigit())
+    order_id = _PHONE_ORDERS.get(normalized)
+    if order_id is None:
+        return {"ok": False, "error": "order_not_found"}
+    return query_order(order_id)

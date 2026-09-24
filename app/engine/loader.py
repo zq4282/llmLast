@@ -14,6 +14,13 @@ class PluginConfigError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ErrorTransitionConfig:
+    reply: str
+    next_state: str
+    out: str
+
+
+@dataclass(frozen=True)
 class TransitionConfig:
     state: str
     intent: str
@@ -21,12 +28,15 @@ class TransitionConfig:
     reply: str
     next_state: str
     out: str
+    on_error: dict[str, ErrorTransitionConfig]
+
+    def error_transition_for(self, error: str) -> ErrorTransitionConfig | None:
+        return self.on_error.get(error)
 
 
 @dataclass(frozen=True)
 class Plugin:
     name: str
-    keywords: tuple[str, ...]
     states: tuple[str, ...]
     terminal_states: frozenset[str]
     prompt: str
@@ -120,6 +130,33 @@ class PluginLoader:
             if key in transition_keys:
                 raise PluginConfigError(f"{path}: 重复动作 {state}/{intent}")
             transition_keys.add(key)
+            on_error: dict[str, ErrorTransitionConfig] = {}
+            raw_on_error = config.get("on_error", {})
+            if not isinstance(raw_on_error, dict):
+                raise PluginConfigError(f"{path}: actions[{index}].on_error 必须是对象")
+            for error_code, error_config in raw_on_error.items():
+                if not isinstance(error_config, dict):
+                    raise PluginConfigError(
+                        f"{path}: actions[{index}].on_error.{error_code} 必须是对象"
+                    )
+                required_error_fields = {"reply", "next", "out"}
+                missing_error_fields = required_error_fields - error_config.keys()
+                if missing_error_fields:
+                    raise PluginConfigError(
+                        f"{path}: actions[{index}].on_error.{error_code} 缺少字段 "
+                        f"{', '.join(sorted(missing_error_fields))}"
+                    )
+                error_next_state = str(error_config["next"])
+                if error_next_state not in states:
+                    raise PluginConfigError(
+                        f"{path}: actions[{index}].on_error.{error_code} "
+                        f"引用了未声明状态 {error_next_state}"
+                    )
+                on_error[str(error_code)] = ErrorTransitionConfig(
+                    reply=str(error_config["reply"]),
+                    next_state=error_next_state,
+                    out=str(error_config["out"]),
+                )
             transitions.append(
                 TransitionConfig(
                     state=state,
@@ -128,6 +165,7 @@ class PluginLoader:
                     reply=str(config["reply"]),
                     next_state=next_state,
                     out=str(config["out"]),
+                    on_error=on_error,
                 )
             )
 
@@ -138,10 +176,15 @@ class PluginLoader:
                 raise PluginConfigError(
                     f"{path}: 动作 {transition.state}/{transition.intent} 引用了未知话术 {transition.reply}"
                 )
+            for error_code, error_transition in transition.on_error.items():
+                if error_transition.reply not in templates and error_transition.reply not in fallbacks:
+                    raise PluginConfigError(
+                        f"{path}: 动作 {transition.state}/{transition.intent} 的错误 "
+                        f"{error_code} 引用了未知话术 {error_transition.reply}"
+                    )
 
         return Plugin(
             name=str(raw["name"]),
-            keywords=tuple(str(item) for item in raw.get("keywords", [])),
             states=states,
             terminal_states=terminal_states,
             prompt=str(raw["prompt"]),

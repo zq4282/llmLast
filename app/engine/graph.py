@@ -55,13 +55,11 @@ def understand(state: ChatState) -> dict[str, Any]:
         context,
         state.get("history", []),
     )
-    slots = {**context, **decision.slots}
     return {
         "plugin_state": plugin_state,
         "intent": decision.intent,
         "intent_confidence": decision.confidence,
-        "slots": slots,
-        "context": slots,
+        "slots": decision.slots,
     }
 
 
@@ -116,8 +114,25 @@ def reply(state: ChatState) -> dict[str, Any]:
     result = state.get("action_result", {})
     if not result.get("ok", True):
         error_code = str(result.get("error", "unknown"))
-        template = plugin.fallbacks.get(error_code, plugin.fallbacks.get("unknown", "处理失败，请重试。"))
-        next_plugin_state = state.get("plugin_state", plugin.initial_state)
+        transition = plugin.transition_for(
+            state.get("plugin_state", plugin.initial_state),
+            state.get("intent", "unknown"),
+        )
+        error_transition = transition.error_transition_for(error_code) if transition else None
+        if error_transition:
+            template = plugin.templates.get(
+                error_transition.reply,
+                plugin.fallbacks.get(error_transition.reply, plugin.fallbacks.get("unknown", "")),
+            )
+            next_plugin_state = error_transition.next_state
+            out = error_transition.out
+        else:
+            template = plugin.fallbacks.get(
+                error_code,
+                plugin.fallbacks.get("unknown", "处理失败，请重试。"),
+            )
+            next_plugin_state = state.get("plugin_state", plugin.initial_state)
+            out = "CHAT"
     else:
         reply_key = state.get("reply_key", "unknown")
         if state.get("use_fallback"):
@@ -125,12 +140,18 @@ def reply(state: ChatState) -> dict[str, Any]:
         else:
             template = plugin.templates.get(reply_key, plugin.fallbacks.get("unknown", ""))
         next_plugin_state = state.get("next_plugin_state", state.get("plugin_state", plugin.initial_state))
+        out = state.get("out", "CHAT")
     values = {**state.get("context", {}), **state.get("slots", {}), **result}
-    context = {key: value for key, value in values.items() if key not in {"ok", "error"}}
+    if result.get("ok", True):
+        context = {key: value for key, value in values.items() if key not in {"ok", "error"}}
+    else:
+        # 查询失败时不持久化本轮无效手机号/订单号，允许用户换另一种信息继续查询。
+        context = dict(state.get("context", {}))
     return {
         "reply": render_template(template, values),
         "plugin_state": next_plugin_state,
         "context": context,
+        "out": out,
     }
 
 
