@@ -65,3 +65,8 @@ def test_redis_store_isolates_tenants_with_same_session_id() -> None:
 
     assert store.get("same-id", tenant_id=1).context == {"tenant": 1}
     assert store.get("same-id", tenant_id=2).context == {"tenant": 2}
+
+    store.delete("same-id", tenant_id=1)
+
+    assert store.get("same-id", tenant_id=1).context == {}
+    assert store.get("same-id", tenant_id=2).context == {"tenant": 2}

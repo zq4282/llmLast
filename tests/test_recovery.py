@@ -1,5 +1,7 @@
 from app.engine.graph import run_graph
 from app.engine.llm import intent_llm
+from app.engine.outputs import DialogueOutput
+from app.engine.recovery import RecoveryStep, recovery_decision
 
 
 class SequenceClient:
@@ -27,6 +29,33 @@ def _next_turn(previous: dict, message: str) -> dict:
         "conversation_status": previous.get("conversation_status", "BOT"),
         "handoff_reason": previous.get("handoff_reason"),
     }
+
+
+def test_two_configured_recovery_steps_handoff_on_second_attempt() -> None:
+    steps = (
+        RecoveryStep("unknown_first", DialogueOutput.CHAT),
+        RecoveryStep("unknown_handoff", DialogueOutput.HUMAN),
+    )
+    initial = {
+        "intent": "unknown",
+        "plugin_state": "CONFIRM_REFUND",
+        "unrecognized_count": 0,
+        "conversation_status": "BOT",
+    }
+
+    first = recovery_decision(initial, steps=steps)
+    assert first is not None
+    second = recovery_decision(
+        {**initial, "unrecognized_count": first["unrecognized_count"]},
+        steps=steps,
+    )
+
+    assert first["reply_key"] == "unknown_first"
+    assert first["out"] == "CHAT"
+    assert second is not None
+    assert second["reply_key"] == "unknown_handoff"
+    assert second["out"] == "HUMAN"
+    assert second["conversation_status"] == "HANDOFF_PENDING"
 
 
 def test_three_unknown_turns_escalate_and_keep_business_state(monkeypatch) -> None:

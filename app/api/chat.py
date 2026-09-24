@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from app.engine.graph import run_graph
-from app.engine.outputs import DialogueOutput
+from app.engine.outputs import DialogueOutput, TERMINAL_OUTPUTS
 from app.integrations.llm_api import LLMAPIError
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.session.store import SessionBusyError, SessionStoreError, session_store
@@ -72,29 +72,34 @@ def _chat_locked(request: ChatRequest, session_id: str) -> ChatResponse:
         raise HTTPException(status_code=500, detail="对话引擎执行失败") from exc
 
     reply_text = result["reply"]
-    session_store.save(
-        session_id,
-        business=result["business"],
-        plugin_state=result.get("plugin_state"),
-        route_task=result.get("route_task"),
-        route_confidence=result.get("route_confidence"),
-        route_locked=result.get("route_locked", False),
-        call_info=result.get("call_info", call_info),
-        context=result.get("context", {}),
-        user_message=request.current_user_text,
-        assistant_message=reply_text,
-        tenant_id=request.tenant_id,
-        unrecognized_count=result.get("unrecognized_count", 0),
-        conversation_status=result.get("conversation_status", "BOT"),
-        handoff_reason=result.get("handoff_reason"),
-        handoff_id=result.get("handoff_id"),
-    )
+    output = result.get("out", DialogueOutput.CHAT)
+    if output in TERMINAL_OUTPUTS:
+        # HUMAN/END 的本轮回复仍正常返回，但服务端不再保留任何旧会话内容。
+        session_store.delete(session_id, tenant_id=request.tenant_id)
+    else:
+        session_store.save(
+            session_id,
+            business=result["business"],
+            plugin_state=result.get("plugin_state"),
+            route_task=result.get("route_task"),
+            route_confidence=result.get("route_confidence"),
+            route_locked=result.get("route_locked", False),
+            call_info=result.get("call_info", call_info),
+            context=result.get("context", {}),
+            user_message=request.current_user_text,
+            assistant_message=reply_text,
+            tenant_id=request.tenant_id,
+            unrecognized_count=result.get("unrecognized_count", 0),
+            conversation_status=result.get("conversation_status", "BOT"),
+            handoff_reason=result.get("handoff_reason"),
+            handoff_id=result.get("handoff_id"),
+        )
     data = {
         key: value
         for key, value in result.get("action_result", {}).items()
         if key not in {"ok", "error"}
     }
-    if result.get("out") == DialogueOutput.HUMAN:
+    if output == DialogueOutput.HUMAN:
         data.update(
             {
                 "unrecognized_count": result.get("unrecognized_count", 0),
@@ -108,6 +113,6 @@ def _chat_locked(request: ChatRequest, session_id: str) -> ChatResponse:
         business=result["business"],
         intent=result["intent"],
         action=result.get("action"),
-        out=result.get("out", DialogueOutput.CHAT),
+        out=output,
         data=data,
     )

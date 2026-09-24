@@ -70,7 +70,11 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         end_response = client.post("/api/chat", json={"sessionId": "api-test", "currentUserText": "没有了"})
         assert end_response.status_code == 200
         assert end_response.json()["out"] == "END"
-        assert session_store.get("api-test").call_info == stored_after_first.call_info
+        ended_session = session_store.get("api-test")
+        assert ended_session.business is None
+        assert ended_session.call_info == {}
+        assert ended_session.context == {}
+        assert ended_session.history == []
 
         assert len(model.calls) == 4
         assert sum(call[0]["role"] == "system" for call in model.calls) == 1
@@ -82,7 +86,7 @@ def test_blank_message_is_rejected() -> None:
     assert response.status_code == 422
 
 
-def test_api_persists_unknown_count_and_stops_after_handoff(monkeypatch) -> None:
+def test_api_clears_session_after_handoff(monkeypatch) -> None:
     model = SequenceClient(
         [
             '{"task":"REFUND","confidence":0.97}',
@@ -129,15 +133,12 @@ def test_api_persists_unknown_count_and_stops_after_handoff(monkeypatch) -> None
         }
 
         stored = session_store.get("api-recovery")
-        assert stored.unrecognized_count == 3
-        assert stored.conversation_status == "HANDOFF_PENDING"
-        assert stored.plugin_state == "CONFIRM_REFUND"
-
-        waiting = client.post(
-            "/api/chat",
-            json={"sessionId": "api-recovery", "currentUserText": "喂"},
-        )
-        assert waiting.json()["out"] == "HUMAN"
+        assert stored.business is None
+        assert stored.plugin_state is None
+        assert stored.context == {}
+        assert stored.history == []
+        assert stored.unrecognized_count == 0
+        assert stored.conversation_status == "BOT"
         assert len(model.calls) == 5
 
 

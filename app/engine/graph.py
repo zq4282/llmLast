@@ -31,13 +31,33 @@ def _use_plugin_recovery_reply(
     if plugin_state not in plugin.states:
         plugin_state = plugin.initial_state
     contextual_key = f"{plugin_state.lower()}_{decision['reply_key']}"
-    if contextual_key not in plugin.fallbacks:
+    if contextual_key in plugin.fallbacks:
+        reply_key = contextual_key
+    elif decision["reply_key"] in plugin.fallbacks:
+        reply_key = decision["reply_key"]
+    else:
         return decision
     return {
         **decision,
-        "reply_key": contextual_key,
+        "reply_key": reply_key,
         "use_system_fallback": False,
     }
+
+
+def _recovery_for_state(
+    state: ChatState,
+    *,
+    trigger: str | None = None,
+) -> dict[str, Any] | None:
+    """读取插件恢复步骤；没有已选插件时使用引擎默认步骤。"""
+
+    resolved_trigger = trigger or ("unknown" if state.get("intent") == "unknown" else None)
+    steps = None
+    business = state.get("business")
+    if resolved_trigger and business and business in plugin_loader.plugins:
+        steps = plugin_loader.get(business).recovery_steps_for(resolved_trigger)
+    decision = recovery_decision(dict(state), trigger=trigger, steps=steps)
+    return _use_plugin_recovery_reply(state, decision) if decision is not None else None
 
 
 def router(state: ChatState) -> dict[str, Any]:
@@ -123,9 +143,9 @@ def understand(state: ChatState) -> dict[str, Any]:
 def decide(state: ChatState) -> dict[str, Any]:
     """根据 plugin_state + intent 查询插件动作表。"""
 
-    recovery = recovery_decision(dict(state))
+    recovery = _recovery_for_state(state)
     if recovery is not None:
-        return _use_plugin_recovery_reply(state, recovery)
+        return recovery
 
     plugin = plugin_loader.get(state["business"])
     plugin_state = state.get("plugin_state", plugin.initial_state)
@@ -146,9 +166,9 @@ def decide(state: ChatState) -> dict[str, Any]:
     if transition is None:
         # 模型可能把乱码误判成 other，也可能返回插件尚未配置的新意图。
         # 这两种情况都不能清零并无限重复同一句兜底；保持业务状态并进入分级恢复。
-        unsupported = recovery_decision(dict(state), trigger="unsupported")
+        unsupported = _recovery_for_state(state, trigger="unsupported")
         assert unsupported is not None
-        return _use_plugin_recovery_reply(state, unsupported)
+        return unsupported
     next_status = "ENDED" if transition.out == DialogueOutput.END else "BOT"
     return {
         "action": transition.action,

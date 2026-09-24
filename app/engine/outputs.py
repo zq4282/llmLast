@@ -12,3 +12,4 @@ class DialogueOutput(StrEnum):
 
 ALLOWED_OUTPUTS = frozenset(item.value for item in DialogueOutput)
 OUTPUT_NAMES = frozenset(DialogueOutput.__members__)
+TERMINAL_OUTPUTS = frozenset({DialogueOutput.HUMAN, DialogueOutput.END})

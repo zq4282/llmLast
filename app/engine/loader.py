@@ -10,6 +10,7 @@ import yaml
 
 from app.engine.action_result import ActionResult, action_success, validate_action_result
 from app.engine.outputs import DialogueOutput, OUTPUT_NAMES
+from app.engine.recovery import RecoveryStep, SYSTEM_FALLBACKS
 from app.engine.route_tasks import ROUTE_TASKS
 
 
@@ -47,6 +48,7 @@ class Plugin:
     transitions: tuple[TransitionConfig, ...]
     templates: dict[str, str]
     fallbacks: dict[str, str]
+    recovery: dict[str, tuple[RecoveryStep, ...]]
     module_prefix: str
     route_task: str
 
@@ -59,6 +61,9 @@ class Plugin:
             (item for item in self.transitions if item.state == state and item.intent == intent),
             None,
         )
+
+    def recovery_steps_for(self, trigger: str) -> tuple[RecoveryStep, ...]:
+        return self.recovery[trigger]
 
 
 class PluginLoader:
@@ -107,6 +112,7 @@ class PluginLoader:
             "actions",
             "templates",
             "fallbacks",
+            "recovery",
         }
         missing = required - raw.keys()
         if missing:
@@ -211,6 +217,68 @@ class PluginLoader:
                         f"{error_code} 引用了未知话术 {error_transition.reply}"
                     )
 
+        raw_recovery = raw["recovery"]
+        if not isinstance(raw_recovery, dict):
+            raise PluginConfigError(f"{path}: recovery 必须是对象")
+        required_recovery_triggers = {"unknown", "unsupported"}
+        missing_recovery_triggers = required_recovery_triggers - raw_recovery.keys()
+        if missing_recovery_triggers:
+            raise PluginConfigError(
+                f"{path}: recovery 缺少类型 {', '.join(sorted(missing_recovery_triggers))}"
+            )
+        extra_recovery_triggers = raw_recovery.keys() - required_recovery_triggers
+        if extra_recovery_triggers:
+            raise PluginConfigError(
+                f"{path}: recovery 包含未知类型 "
+                f"{', '.join(sorted(extra_recovery_triggers))}"
+            )
+        recovery: dict[str, tuple[RecoveryStep, ...]] = {}
+        for trigger in sorted(required_recovery_triggers):
+            raw_steps = raw_recovery[trigger]
+            if not isinstance(raw_steps, list) or not raw_steps:
+                raise PluginConfigError(f"{path}: recovery.{trigger} 必须是非空列表")
+            steps: list[RecoveryStep] = []
+            for index, raw_step in enumerate(raw_steps):
+                if not isinstance(raw_step, dict):
+                    raise PluginConfigError(
+                        f"{path}: recovery.{trigger}[{index}] 必须是对象"
+                    )
+                missing_step_fields = {"reply", "out"} - raw_step.keys()
+                if missing_step_fields:
+                    raise PluginConfigError(
+                        f"{path}: recovery.{trigger}[{index}] 缺少字段 "
+                        f"{', '.join(sorted(missing_step_fields))}"
+                    )
+                reply_key = str(raw_step["reply"])
+                output_name = str(raw_step["out"]).strip().upper()
+                if output_name not in {"CHAT", "HUMAN"}:
+                    raise PluginConfigError(
+                        f"{path}: recovery.{trigger}[{index}].out 只能是 CHAT 或 HUMAN"
+                    )
+                output = DialogueOutput[output_name]
+                contextual_keys = {
+                    f"{state.lower()}_{reply_key}"
+                    for state in states
+                }
+                if (
+                    reply_key not in fallbacks
+                    and reply_key not in SYSTEM_FALLBACKS
+                    and not contextual_keys.intersection(fallbacks)
+                ):
+                    raise PluginConfigError(
+                        f"{path}: recovery.{trigger}[{index}] 引用了未知话术 {reply_key}"
+                    )
+                if index < len(raw_steps) - 1 and output != DialogueOutput.CHAT:
+                    raise PluginConfigError(
+                        f"{path}: recovery.{trigger} 只有最后一步可以转人工"
+                    )
+                steps.append(RecoveryStep(reply_key, output))
+            if steps[-1].out != DialogueOutput.HUMAN:
+                raise PluginConfigError(
+                    f"{path}: recovery.{trigger} 最后一步必须设置 out: HUMAN"
+                )
+            recovery[trigger] = tuple(steps)
+
         route_task = str(raw["route_task"]).strip().upper()
         if not route_task:
             raise PluginConfigError(f"{path}: route_task 不能为空")
@@ -229,6 +297,7 @@ class PluginLoader:
             transitions=tuple(transitions),
             templates=templates,
             fallbacks=fallbacks,
+            recovery=recovery,
             module_prefix=f"app.businesses.{path.parent.name}",
             route_task=route_task,
         )

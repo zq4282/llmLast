@@ -43,6 +43,8 @@ class Session:
 class SessionStore(Protocol):
     def get(self, session_id: str, *, tenant_id: int = 1002) -> Session: ...
 
+    def delete(self, session_id: str, *, tenant_id: int = 1002) -> None: ...
+
     def save(
         self,
         session_id: str,
@@ -85,6 +87,12 @@ class MemorySessionStore:
         key = self._key(session_id, tenant_id)
         with self._guard:
             return deepcopy(self._sessions.get(key, Session()))
+
+    def delete(self, session_id: str, *, tenant_id: int = 1002) -> None:
+        key = self._key(session_id, tenant_id)
+        with self._guard:
+            # 当前调用仍持有该会话锁，不能在这里移除锁对象，否则并发请求可能绕过互斥。
+            self._sessions.pop(key, None)
 
     def save(
         self,
@@ -198,6 +206,12 @@ class RedisSessionStore:
             )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise SessionStoreError("Redis 会话数据格式错误") from exc
+
+    def delete(self, session_id: str, *, tenant_id: int = 1002) -> None:
+        try:
+            self._client.delete(self._key(session_id, tenant_id))
+        except RedisError as exc:
+            raise SessionStoreError("删除 Redis 会话失败") from exc
 
     def save(
         self,

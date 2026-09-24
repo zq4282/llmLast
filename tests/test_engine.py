@@ -20,7 +20,7 @@ def test_plugin_rejects_unknown_output(tmp_path: Path) -> None:
     invalid_plugin = tmp_path / "refund" / "plugin.yaml"
     invalid_plugin.parent.mkdir()
     invalid_plugin.write_text(
-        source.replace("out: CHAT", "out: OTHER", 1),
+        source.replace("out: REFUND", "out: OTHER", 1),
         encoding="utf-8",
     )
 
@@ -33,6 +33,8 @@ def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:
 
     assert plugin.states == ("IDLE", "CONFIRM_REFUND", "ASK_ORDER_INFO", "ASK_OTHER", "END")
     assert plugin.terminal_states == {"END"}
+    assert len(plugin.recovery_steps_for("unknown")) == 3
+    assert len(plugin.recovery_steps_for("unsupported")) == 3
     transition = plugin.transition_for("CONFIRM_REFUND", "affirm")
     assert transition is not None
     assert transition.action == "submit_refund"
@@ -49,6 +51,35 @@ def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:
     assert end_transition is not None
     assert end_transition.next_state == "END"
     assert end_transition.out == "END"
+
+
+def test_recovery_step_count_is_derived_from_config(tmp_path: Path) -> None:
+    source = Path("app/businesses/refund/plugin.yaml").read_text(encoding="utf-8")
+    three_steps = """  unknown:
+    - reply: unknown_first
+      out: CHAT
+    - reply: unknown_second
+      out: CHAT
+    - reply: unknown_handoff
+      out: HUMAN
+"""
+    two_steps = """  unknown:
+    - reply: unknown_first
+      out: CHAT
+    - reply: unknown_handoff
+      out: HUMAN
+"""
+    assert three_steps in source
+    plugin_path = tmp_path / "refund" / "plugin.yaml"
+    plugin_path.parent.mkdir()
+    plugin_path.write_text(source.replace(three_steps, two_steps, 1), encoding="utf-8")
+
+    plugin = PluginLoader(tmp_path).load_all()["refund"]
+
+    assert [step.reply for step in plugin.recovery_steps_for("unknown")] == [
+        "unknown_first",
+        "unknown_handoff",
+    ]
 
 
 def test_known_action_error_uses_dsl_before_global_fallback() -> None:

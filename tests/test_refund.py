@@ -84,7 +84,7 @@ def test_refund_asks_for_order_info_and_continues_with_phone(monkeypatch) -> Non
             '{"intent":"refund_request","confidence":0.93,'
             '"slots":{"backup_phone":null,"order_no":null}}',
             '{"intent":"provide_info","confidence":0.98,'
-            '"slots":{"backup_phone":"17600184282","order_no":null}}',
+                '"slots":{"backup_phone":"13800138000","order_no":null}}',
             '{"intent":"affirm","confidence":0.95,'
             '"slots":{"backup_phone":null,"order_no":null}}',
         ]
@@ -110,7 +110,7 @@ def test_refund_asks_for_order_info_and_continues_with_phone(monkeypatch) -> Non
     second = run_graph(
         {
             "session_id": "refund-missing-order",
-            "message": "手机号是 17600184282",
+            "message": "手机号是 13800138000",
             "history": [
                 {"role": "user", "content": "我要退款"},
                 {"role": "assistant", "content": first["reply"]},
@@ -135,7 +135,7 @@ def test_refund_asks_for_order_info_and_continues_with_phone(monkeypatch) -> Non
             "history": [
                 {"role": "user", "content": "我要退款"},
                 {"role": "assistant", "content": first["reply"]},
-                {"role": "user", "content": "手机号是 17600184282"},
+                {"role": "user", "content": "手机号是 13800138000"},
                 {"role": "assistant", "content": second["reply"]},
             ],
             "business": second["business"],
@@ -173,7 +173,7 @@ def test_refund_queries_order_with_caller_from_call_info(monkeypatch) -> None:
             "route_locked": False,
             "context": {},
             "call_info": {
-                "caller": "17600184282",
+                "caller": "13800138000",
                 "callee": "10000",
                 "call_start_time": "2026-09-24 10:00:00",
             },
@@ -191,7 +191,7 @@ def test_refund_keeps_asking_when_supplied_order_is_not_found(monkeypatch) -> No
             '{"intent":"provide_info","confidence":0.98,'
             '"slots":{"backup_phone":null,"order_no":"NOT_FOUND"}}',
             '{"intent":"provide_info","confidence":0.98,'
-            '"slots":{"backup_phone":"17600184282","order_no":null}}',
+            '"slots":{"backup_phone":"13800138000","order_no":null}}',
         ]
     )
     monkeypatch.setattr(intent_llm, "client", model)
@@ -219,7 +219,7 @@ def test_refund_keeps_asking_when_supplied_order_is_not_found(monkeypatch) -> No
     recovered = run_graph(
         {
             "session_id": "refund-invalid-order",
-            "message": "那用手机号 17600184282 查",
+            "message": "那用手机号 13800138000 查",
             "history": [
                 {"role": "user", "content": "订单号是 NOT_FOUND"},
                 {"role": "assistant", "content": result["reply"]},

@@ -33,6 +33,7 @@ const state = {
   loading: false,
   history: [],
   callStartTime: "",
+  terminal: false,
 };
 
 const DEFAULTS = {
@@ -139,6 +140,13 @@ function setInputError(message) {
 }
 
 async function sendMessage(message) {
+  if (state.terminal) {
+    elements.session.value = createSessionId();
+    state.turns = 0;
+    state.history = [];
+    state.callStartTime = formatDateTime();
+    state.terminal = false;
+  }
   const sessionId = elements.session.value.trim() || createSessionId();
   elements.session.value = sessionId;
   setSending(true);
@@ -181,6 +189,11 @@ async function sendMessage(message) {
       aiText: payload.reply,
       time: requestTime,
     });
+    if (payload.out === "HUMAN" || payload.out === "END") {
+      // 保留终态回复供用户查看；下一次发送时换新 sessionId，且不携带旧历史。
+      state.history = [];
+      state.terminal = true;
+    }
     updateInspector(payload, elapsed);
     elements.input.value = "";
     elements.count.textContent = "0 / 4000";
@@ -230,6 +243,7 @@ elements.session.addEventListener("change", () => {
   state.turns = 0;
   state.history = [];
   state.callStartTime = formatDateTime();
+  state.terminal = false;
   elements.turnCount.textContent = "尚未发送消息";
 });
 
@@ -238,6 +252,7 @@ elements.newSession.addEventListener("click", () => {
   state.turns = 0;
   state.response = null;
   state.history = [];
+  state.terminal = false;
   state.callStartTime = formatDateTime();
   elements.messages.replaceChildren();
   const empty = document.createElement("div");

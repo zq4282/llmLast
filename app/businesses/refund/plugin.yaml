@@ -10,6 +10,22 @@ states:
 
 terminal_states: [END]
 
+recovery:
+  unknown:
+    - reply: unknown_first
+      out: CHAT
+    - reply: unknown_second
+      out: CHAT
+    - reply: unknown_handoff
+      out: HUMAN
+  unsupported:
+    - reply: unsupported_first
+      out: CHAT
+    - reply: unsupported_second
+      out: CHAT
+    - reply: unsupported_handoff
+      out: HUMAN
+
 prompt: |
   你是退款客服系统的意图识别模块。你只负责理解用户说的话，不负责回复用户，不决定是否退款，不调用任何工具，不输出对外动作。
 
@@ -174,6 +190,12 @@ fallbacks:
   human: "正在为您转接人工，请稍候。"
   unknown: "抱歉，我没太听明白，您能再说一遍吗？"
   end: "本次服务已结束，感谢您的来电。"
+  unknown_first: "抱歉，我没太听明白。请根据上一条提示重新回答。"
+  unknown_second: "抱歉，我还是没能理解。请再回答一次，或直接说“转人工”。"
+  unknown_handoff: "还是没能理解您的意思，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
+  unsupported_first: "当前流程无法处理这句话，请根据上一条提示重新回答。"
+  unsupported_second: "当前流程仍无法处理您的回复。请再回答一次，或直接说“转人工”。"
+  unsupported_handoff: "当前流程无法继续处理，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
   idle_unknown_first: "抱歉，我没有理解您的回复。请说明您需要查询扣款、申请退款，还是转人工客服。"
   idle_unknown_second: "请直接说明“申请退款”或“转人工”。如果仍无法识别，我将为您转接人工客服。"
   idle_unsupported_first: "当前退款流程无法处理这项内容。请说明是否继续申请退款，或回复“转人工”。"

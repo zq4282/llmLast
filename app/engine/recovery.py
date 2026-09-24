@@ -1,10 +1,11 @@
 """与具体业务无关的未理解恢复和转人工策略。"""
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from app.engine.outputs import DialogueOutput
 
-MAX_UNRECOGNIZED_ATTEMPTS = 3
 ACTIVE_HANDOFF_STATUSES = frozenset({"HANDOFF_PENDING", "HUMAN"})
 
 SYSTEM_FALLBACKS = {
@@ -30,10 +31,33 @@ SYSTEM_FALLBACKS = {
 }
 
 
+@dataclass(frozen=True)
+class RecoveryStep:
+    """一次恢复尝试的话术和对外输出；步骤数量就是最大恢复次数。"""
+
+    reply: str
+    out: DialogueOutput
+
+
+DEFAULT_RECOVERY_STEPS = {
+    "unknown": (
+        RecoveryStep("unknown_first", DialogueOutput.CHAT),
+        RecoveryStep("unknown_second", DialogueOutput.CHAT),
+        RecoveryStep("unknown_handoff", DialogueOutput.HUMAN),
+    ),
+    "unsupported": (
+        RecoveryStep("unsupported_first", DialogueOutput.CHAT),
+        RecoveryStep("unsupported_second", DialogueOutput.CHAT),
+        RecoveryStep("unsupported_handoff", DialogueOutput.HUMAN),
+    ),
+}
+
+
 def recovery_decision(
     state: dict[str, Any],
     *,
     trigger: str | None = None,
+    steps: Sequence[RecoveryStep] | None = None,
 ) -> dict[str, Any] | None:
     """为未理解和人工接管生成统一决策；正常业务返回 None。"""
 
@@ -69,27 +93,27 @@ def recovery_decision(
     elif trigger not in {"unknown", "unsupported"}:
         raise ValueError(f"未知恢复触发类型: {trigger}")
 
+    configured_steps = tuple(DEFAULT_RECOVERY_STEPS[trigger] if steps is None else steps)
+    if not configured_steps:
+        raise ValueError(f"恢复步骤不能为空: {trigger}")
     count = current_count + 1
-    if count < MAX_UNRECOGNIZED_ATTEMPTS:
-        retry_stage = "first" if count == 1 else "second"
-        return _decision(
-            reply_key=f"{trigger}_{retry_stage}",
-            out=DialogueOutput.CHAT,
-            plugin_state=plugin_state,
-            count=count,
-            status="BOT",
-            reason=None,
-        )
+    # 最后一步应由配置声明为 HUMAN；min 仅用于防御脏会话计数。
+    step = configured_steps[min(count - 1, len(configured_steps) - 1)]
+    is_handoff = step.out == DialogueOutput.HUMAN
     return _decision(
-        reply_key=f"{trigger}_handoff",
-        out=DialogueOutput.HUMAN,
+        reply_key=step.reply,
+        out=step.out,
         plugin_state=plugin_state,
         count=count,
-        status="HANDOFF_PENDING",
+        status="HANDOFF_PENDING" if is_handoff else "BOT",
         reason=(
-            "CONSECUTIVE_UNRECOGNIZED"
-            if trigger == "unknown"
-            else "CONSECUTIVE_UNSUPPORTED"
+            (
+                "CONSECUTIVE_UNRECOGNIZED"
+                if trigger == "unknown"
+                else "CONSECUTIVE_UNSUPPORTED"
+            )
+            if is_handoff
+            else None
         ),
     )
 
