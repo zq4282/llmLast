@@ -9,6 +9,7 @@ from typing import Any, Callable
 import yaml
 
 from app.engine.action_result import ActionResult, action_success, validate_action_result
+from app.engine.outputs import DialogueOutput, OUTPUT_NAMES
 from app.engine.route_tasks import ROUTE_TASKS
 
 
@@ -20,7 +21,7 @@ class PluginConfigError(RuntimeError):
 class ErrorTransitionConfig:
     reply: str
     next_state: str
-    out: str
+    out: DialogueOutput
 
 
 @dataclass(frozen=True)
@@ -30,7 +31,7 @@ class TransitionConfig:
     action: str
     reply: str
     next_state: str
-    out: str
+    out: DialogueOutput
     on_error: dict[str, ErrorTransitionConfig]
 
     def error_transition_for(self, error: str) -> ErrorTransitionConfig | None:
@@ -136,6 +137,13 @@ class PluginLoader:
             state = str(config["state"])
             next_state = str(config["next"])
             intent = str(config["intent"])
+            output_name = str(config["out"]).strip().upper()
+            try:
+                output = DialogueOutput[output_name]
+            except KeyError as exc:
+                raise PluginConfigError(
+                    f"{path}: actions[{index}].out 必须是 {sorted(OUTPUT_NAMES)} 之一"
+                ) from exc
             if state not in states or next_state not in states:
                 raise PluginConfigError(f"{path}: 动作 {state}/{intent} 引用了未声明状态")
             key = (state, intent)
@@ -159,6 +167,14 @@ class PluginLoader:
                         f"{', '.join(sorted(missing_error_fields))}"
                     )
                 error_next_state = str(error_config["next"])
+                error_output_name = str(error_config["out"]).strip().upper()
+                try:
+                    error_output = DialogueOutput[error_output_name]
+                except KeyError as exc:
+                    raise PluginConfigError(
+                        f"{path}: actions[{index}].on_error.{error_code}.out "
+                        f"必须是 {sorted(OUTPUT_NAMES)} 之一"
+                    ) from exc
                 if error_next_state not in states:
                     raise PluginConfigError(
                         f"{path}: actions[{index}].on_error.{error_code} "
@@ -167,7 +183,7 @@ class PluginLoader:
                 on_error[str(error_code)] = ErrorTransitionConfig(
                     reply=str(error_config["reply"]),
                     next_state=error_next_state,
-                    out=str(error_config["out"]),
+                    out=error_output,
                 )
             transitions.append(
                 TransitionConfig(
@@ -176,7 +192,7 @@ class PluginLoader:
                     action=str(config["do"]),
                     reply=str(config["reply"]),
                     next_state=next_state,
-                    out=str(config["out"]),
+                    out=output,
                     on_error=on_error,
                 )
             )

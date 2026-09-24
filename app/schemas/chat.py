@@ -6,6 +6,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.engine.outputs import DialogueOutput
+
 
 def _current_time_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -93,5 +95,5 @@ class ChatResponse(BaseModel):
     business: str
     intent: str
     action: str | None = None
-    out: str = "CHAT"
+    out: DialogueOutput = DialogueOutput.CHAT
     data: dict[str, Any] = Field(default_factory=dict)
