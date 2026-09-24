@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 import yaml
 
+from app.engine.action_result import ActionResult, action_success, validate_action_result
 from app.engine.route_tasks import ROUTE_TASKS
 
 
@@ -64,7 +65,7 @@ class PluginLoader:
         self.businesses_dir = businesses_dir or Path(__file__).parents[1] / "businesses"
         self._plugins: dict[str, Plugin] = {}
         self._route_plugins: dict[str, str] = {}
-        self._handlers: dict[tuple[str, str], Callable] = {}
+        self._handlers: dict[tuple[str, str], Callable[[dict[str, Any]], ActionResult]] = {}
         self._lock = RLock()
 
     def load_all(self, *, force: bool = False) -> dict[str, Plugin]:
@@ -236,9 +237,16 @@ class PluginLoader:
             return plugins[plugin_name]
         raise PluginConfigError(f"没有可处理 Task {normalized_task} 的插件")
 
-    def execute(self, business: str, action: str, state: dict[str, Any]) -> dict[str, Any]:
+    def invoke_action_handler(
+        self,
+        business: str,
+        action: str,
+        state: dict[str, Any],
+    ) -> ActionResult:
+        """查找并调用 actions.do 指定的业务函数，只执行一个 action。"""
+
         if action == "none":
-            return {"ok": True}
+            return action_success()
         plugin = self.get(business)
         cache_key = (business, action)
         handler = self._handlers.get(cache_key)
@@ -246,10 +254,10 @@ class PluginLoader:
             module = import_module(f"{plugin.module_prefix}.handlers")
             handler = getattr(module, action)
             self._handlers[cache_key] = handler
+
+        # 真正执行 app.businesses.<业务>.handlers 中业务函数的位置。
         result = handler(state)
-        if not isinstance(result, dict):
-            raise TypeError(f"{business}.{action} 必须返回 dict")
-        return result
+        return validate_action_result(result, f"{business}.{action}")
 
 
 plugin_loader = PluginLoader()

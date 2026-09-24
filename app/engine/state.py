@@ -2,6 +2,8 @@
 
 from typing import Any, TypedDict
 
+from app.engine.action_result import ActionResult
+
 
 class ChatState(TypedDict, total=False):
     """统一图状态。
@@ -35,7 +37,7 @@ class ChatState(TypedDict, total=False):
     intent: str
     # 【可选】插件内意图置信度，仅用于观测，删除不影响流程。
     intent_confidence: float
-    # 【本轮需要】本轮模型新抽取的槽位；execute 会按需与 context 合并。
+    # 【本轮需要】本轮模型新抽取的槽位；action handler 会按需与 context 合并。
     slots: dict[str, Any]
     # 【跨轮必需】已累积的槽位和 API 结果，例如 order_no/amount/merchant。
     context: dict[str, Any]
@@ -53,8 +55,8 @@ class ChatState(TypedDict, total=False):
     use_fallback: bool
 
     # ===== 执行与回复（单轮临时/最终输出） =====
-    # 【本轮需要】execute 调用业务 API 后的结果，reply 用于填充话术和更新 context。
-    action_result: dict[str, Any]
+    # 【本轮需要】run_action 调用业务 API 后的结果，reply 用于填充话术和更新 context。
+    action_result: ActionResult
     # 【最终输出】对用户的回复文本。
     reply: str
     # 【可选】内部错误详情，用于日志/排查；不应直接返回给用户。

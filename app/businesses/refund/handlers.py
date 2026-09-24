@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from app.engine.action_result import ActionResult, action_failure, action_success
 from app.integrations import order_api, refund_api
 
 
@@ -14,7 +15,7 @@ def _use_order_no(result: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def query_order(state: dict[str, Any]) -> dict[str, Any]:
+def query_order(state: dict[str, Any]) -> ActionResult:
     """退款流程中的订单校验能力，也可被后续动作表直接引用。"""
 
     values = {**state.get("context", {}), **state.get("slots", {})}
@@ -28,20 +29,33 @@ def query_order(state: dict[str, Any]) -> dict[str, Any]:
         order = order_api.query_current_order()
     order = _use_order_no(order)
     if not order.get("ok"):
-        return order
-    return {**order, "merchant": order.get("merchant", order.get("item", "未知商户"))}
+        return action_failure(
+            str(order.get("error", "unknown")),
+            **{key: value for key, value in order.items() if key not in {"ok", "error"}},
+        )
+    data = {key: value for key, value in order.items() if key != "ok"}
+    data["merchant"] = order.get("merchant", order.get("item", "未知商户"))
+    return action_success(**data)
 
 
-def submit_refund(state: dict[str, Any]) -> dict[str, Any]:
+def submit_refund(state: dict[str, Any]) -> ActionResult:
     values = {**state.get("context", {}), **state.get("slots", {})}
     order_no = values.get("order_no")
     if not order_no:
-        return {"ok": False, "error": "missing_order_no"}
+        return action_failure("missing_order_no")
     result = _use_order_no(
         refund_api.submit_refund(order_no.upper(), values.get("reason", "用户申请"))
     )
-    return {**result, "eta": result.get("eta", "1-3 个工作日")}
+    data = {key: value for key, value in result.items() if key not in {"ok", "error"}}
+    if not result.get("ok"):
+        return action_failure(str(result.get("error", "unknown")), **data)
+    data.setdefault("eta", "1-3 个工作日")
+    return action_success(**data)
 
 
-def query_refund(state: dict[str, Any]) -> dict[str, Any]:
-    return _use_order_no(refund_api.query_refund(state["slots"]["order_no"].upper()))
+def query_refund(state: dict[str, Any]) -> ActionResult:
+    result = _use_order_no(refund_api.query_refund(state["slots"]["order_no"].upper()))
+    data = {key: value for key, value in result.items() if key not in {"ok", "error"}}
+    if not result.get("ok"):
+        return action_failure(str(result.get("error", "unknown")), **data)
+    return action_success(**data)

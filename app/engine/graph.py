@@ -97,11 +97,15 @@ def decide(state: ChatState) -> dict[str, Any]:
     }
 
 
-def execute(state: ChatState) -> dict[str, Any]:
-    """调用插件动作表 do 字段对应的业务 handler。"""
+def run_action(state: ChatState) -> dict[str, Any]:
+    """图节点：运行 decide 选中的一个业务 action。"""
 
     try:
-        result = plugin_loader.execute(state["business"], state.get("action", "none"), dict(state))
+        result = plugin_loader.invoke_action_handler(
+            state["business"],
+            state.get("action", "none"),
+            dict(state),
+        )
         return {"action_result": result}
     except Exception as exc:  # 外部适配器异常统一收敛，不能击穿聊天接口
         return {"action_result": {"ok": False, "error": "internal_error"}, "error": str(exc)}
@@ -165,16 +169,16 @@ def get_graph():
     builder.add_node("understand", understand)
     # 决定
     builder.add_node("decide", decide)
-    # 执行
-    builder.add_node("execute", execute)
+    # 执行 decide 选中的业务 action
+    builder.add_node("run_action", run_action)
     # 回复
     builder.add_node("reply", reply)
 
     builder.add_edge(START, "router")
     builder.add_edge("router", "understand")
     builder.add_edge("understand", "decide")
-    builder.add_edge("decide", "execute")
-    builder.add_edge("execute", "reply")
+    builder.add_edge("decide", "run_action")
+    builder.add_edge("run_action", "reply")
     builder.add_edge("reply", END)
     return builder.compile()
 

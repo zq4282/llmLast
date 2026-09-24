@@ -4,7 +4,7 @@
 `POST /api/chat`，内部所有业务共用一张五节点流程图：
 
 ```text
-router → understand → decide → execute → reply
+router → understand → decide → run_action → reply
 ```
 
 退款、查询、停机保号和兜底聊天均为 YAML 插件。新增业务时只需在
