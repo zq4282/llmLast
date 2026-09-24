@@ -1,5 +1,6 @@
 from app.engine.graph import run_graph
 from app.engine.llm import intent_llm
+from app.integrations import refund_api
 
 
 class SequenceClient:
@@ -10,6 +11,16 @@ class SequenceClient:
     def chat(self, messages: list[dict[str, str]], *, temperature: float = 0.0) -> str:
         self.calls.append(messages)
         return self.responses.pop(0)
+
+
+def test_refund_api_uses_order_no_everywhere() -> None:
+    submitted = refund_api.submit_refund("ORD202405030003")
+    queried = refund_api.query_refund("ORD202405030003")
+
+    assert submitted["order_no"] == "ORD202405030003"
+    assert queried["order_no"] == "ORD202405030003"
+    assert "order_id" not in submitted
+    assert "order_id" not in queried
 
 
 def test_refund_state_machine_runs_across_turns(monkeypatch) -> None:

@@ -5,7 +5,7 @@ from typing import Any
 
 _ORDERS = {
     "ORD202405010001": {
-        "orderNo": "ORD202405010001",
+        "order_no": "ORD202405010001",
         "productName": "专业版年度会员订阅",
         "payStatus": "支付成功",
         "payTime": "2024-05-01 10:15:30",
@@ -19,7 +19,7 @@ _ORDERS = {
         "cancelTime": None,
     },
     "ORD202405020002": {
-        "orderNo": "ORD202405020002",
+        "order_no": "ORD202405020002",
         "productName": "云存储扩容包 (100GB/月)",
         "payStatus": "支付成功",
         "payTime": "2024-05-02 14:20:10",
@@ -33,7 +33,7 @@ _ORDERS = {
         "cancelTime": "2024-05-03 09:10:00",
     },
     "ORD202405030003": {
-        "orderNo": "ORD202405030003",
+        "order_no": "ORD202405030003",
         "productName": "高级团队版按月订阅",
         "payStatus": "支付成功",
         "payTime": "2024-05-03 16:45:00",
@@ -47,7 +47,7 @@ _ORDERS = {
         "cancelTime": "2024-05-15 11:30:22",
     },
     "ORD202405040004": {
-        "orderNo": "ORD202405040004",
+        "order_no": "ORD202405040004",
         "productName": "基础会员连续包月",
         "payStatus": "支付失败",
         "payTime": None,
@@ -65,7 +65,7 @@ _ORDERS = {
 _PHONE_ORDERS = {
     "17600184282": {
         "ORD202405030009": {
-            "orderNo": "ORD202405030003",
+            "order_no": "ORD202405030003",
             "productName": "高级团队版按月订阅",
             "payStatus": "支付成功",
             "payTime": "2024-05-03 16:45:00",
@@ -79,7 +79,7 @@ _PHONE_ORDERS = {
             "cancelTime": "2024-05-15 11:30:22",
         },
         "ORD202405040008": {
-            "orderNo": "ORD202405040004",
+            "order_no": "ORD202405040004",
             "productName": "基础会员连续包月",
             "payStatus": "支付成功",
             "payTime": "2024-05-03 16:45:00",
@@ -109,7 +109,7 @@ def _normalize_order(order: dict[str, Any]) -> dict[str, Any]:
         status = "unpaid"
     return {
         "ok": True,
-        "order_no": raw.get("orderNo"),
+        "order_no": raw.get("order_no"),
         "merchant": raw.get("productName"),
         "amount": raw.get("payAmount"),
         "status": status,

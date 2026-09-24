@@ -10,15 +10,6 @@ from app.engine.action_result import (
 from app.integrations import order_api, refund_api
 
 
-def _use_order_no(result: dict[str, Any]) -> dict[str, Any]:
-    """将底层接口的 order_id 适配为退款插件统一使用的 order_no。"""
-
-    normalized = dict(result)
-    if "order_id" in normalized:
-        normalized["order_no"] = normalized.pop("order_id")
-    return normalized
-
-
 def query_order(state: dict[str, Any]) -> ActionResult:
     """退款流程中的订单校验能力，也可被后续动作表直接引用。"""
 
@@ -31,7 +22,6 @@ def query_order(state: dict[str, Any]) -> ActionResult:
 
     # 由本轮 state 动态组装参数，实际调用形如 query_order(order_no=...)。
     order = order_api.query_order(**query_params)
-    order = _use_order_no(order)
     data = {
         key: value
         for key, value in order.items()
@@ -48,9 +38,7 @@ def submit_refund(state: dict[str, Any]) -> ActionResult:
     order_no = values.get("order_no")
     if not order_no:
         return action_failure("missing_order_no")
-    result = _use_order_no(
-        refund_api.submit_refund(order_no.upper(), values.get("reason", "用户申请"))
-    )
+    result = refund_api.submit_refund(order_no.upper(), values.get("reason", "用户申请"))
     data = {
         key: value
         for key, value in result.items()
@@ -58,12 +46,12 @@ def submit_refund(state: dict[str, Any]) -> ActionResult:
     }
     if not result.get("ok"):
         return action_failure(str(result.get("error", "internal_error")), **data)
-    data.setdefault("eta", "1-3 个工作日")
+    data.setdefault("eta", "1到3个工作日")
     return action_success(**data)
 
 
 def query_refund(state: dict[str, Any]) -> ActionResult:
-    result = _use_order_no(refund_api.query_refund(state["slots"]["order_no"].upper()))
+    result = refund_api.query_refund(state["slots"]["order_no"].upper())
     data = {
         key: value
         for key, value in result.items()
