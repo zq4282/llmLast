@@ -9,9 +9,9 @@ from app.engine.action_result import (
 
 def test_action_result_helpers_make_contract_explicit() -> None:
     assert action_success(order_no="A1001") == {"ok": True, "order_no": "A1001"}
-    assert action_failure("order_not_found", order_no="A404") == {
+    assert action_failure("upstream_timeout", order_no="A404") == {
         "ok": False,
-        "error": "order_not_found",
+        "error": "upstream_timeout",
         "order_no": "A404",
     }
 

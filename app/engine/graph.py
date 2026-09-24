@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from app.engine.action_result import action_failure
 from app.engine.llm import intent_llm
 from app.engine.loader import plugin_loader
 from app.engine.render import render_template
@@ -108,7 +109,7 @@ def run_action(state: ChatState) -> dict[str, Any]:
         )
         return {"action_result": result}
     except Exception as exc:  # 外部适配器异常统一收敛，不能击穿聊天接口
-        return {"action_result": {"ok": False, "error": "internal_error"}, "error": str(exc)}
+        return {"action_result": action_failure("internal_error"), "error": str(exc)}
 
 
 def reply(state: ChatState) -> dict[str, Any]:
@@ -116,12 +117,12 @@ def reply(state: ChatState) -> dict[str, Any]:
 
     plugin = plugin_loader.get(state["business"])
     result = state.get("action_result", {})
+    transition = plugin.transition_for(
+        state.get("plugin_state", plugin.initial_state),
+        state.get("intent", "unknown"),
+    )
     if not result.get("ok", True):
         error_code = str(result.get("error", "unknown"))
-        transition = plugin.transition_for(
-            state.get("plugin_state", plugin.initial_state),
-            state.get("intent", "unknown"),
-        )
         error_transition = transition.error_transition_for(error_code) if transition else None
         if error_transition:
             template = plugin.templates.get(
@@ -131,6 +132,7 @@ def reply(state: ChatState) -> dict[str, Any]:
             next_plugin_state = error_transition.next_state
             out = error_transition.out
         else:
+            # 当前 action 未声明该错误码时，才进入插件级全局兜底。
             template = plugin.fallbacks.get(
                 error_code,
                 plugin.fallbacks.get("unknown", "处理失败，请重试。"),
@@ -147,9 +149,13 @@ def reply(state: ChatState) -> dict[str, Any]:
         out = state.get("out", "CHAT")
     values = {**state.get("context", {}), **state.get("slots", {}), **result}
     if result.get("ok", True):
-        context = {key: value for key, value in values.items() if key not in {"ok", "error"}}
+        context = {
+            key: value
+            for key, value in values.items()
+            if key not in {"ok", "error"}
+        }
     else:
-        # 查询失败时不持久化本轮无效手机号/订单号，允许用户换另一种信息继续查询。
+        # 业务未完成或技术失败时，不持久化本轮无效参数。
         context = dict(state.get("context", {}))
     return {
         "reply": render_template(template, values),

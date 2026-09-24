@@ -47,7 +47,7 @@ class ChatState(TypedDict, total=False):
     action: str | None
     # 【必需】actions.reply 或 fallback key，reply 节点用它选话术。
     reply_key: str
-    # 【必需】actions.next；reply 成功后写回 plugin_state，失败时可由 on_error 覆盖。
+    # 【必需】actions.next；成功后写回 plugin_state，失败时可由 on_error 覆盖。
     next_plugin_state: str
     # 【必需】actions.out，对外标识 CHAT/REFUND/HUMAN/END。
     out: str

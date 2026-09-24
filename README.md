@@ -31,7 +31,7 @@ curl -X POST http://127.0.0.1:8000/api/chat \
 
 curl -X POST http://127.0.0.1:8000/api/chat \
   -H 'Content-Type: application/json' \
-  -d '{"session_id":"demo-1","message":"订单号 A1001，因为买错了"}'
+  -d '{"session_id":"demo-1","message":"订单号 ORD202405010001，因为买错了"}'
 ```
 
 不配置 LLM Key 时会使用内置规则进行路由和意图识别，便于本地开发及测试。

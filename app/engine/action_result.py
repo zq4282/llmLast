@@ -21,7 +21,7 @@ def action_success(**data: Any) -> ActionResult:
 
 
 def action_failure(error: str, **data: Any) -> ActionResult:
-    """构造失败结果；error 对应 plugin.yaml 中 on_error 的错误码。"""
+    """构造失败结果；error 优先交给当前 action 的 on_error 处理。"""
 
     _reject_reserved_fields(data)
     if not error:

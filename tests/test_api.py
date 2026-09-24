@@ -20,7 +20,7 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         [
             '{"task":"REFUND","confidence":0.97}',
             '{"intent":"refund_request","confidence":0.93,'
-            '"slots":{"backup_phone":null,"order_no":null}}',
+            '"slots":{"backup_phone":null,"order_no":"ORD202405010001"}}',
             '{"intent":"affirm","confidence":0.95,'
             '"slots":{"backup_phone":null,"order_no":null}}',
             '{"intent":"end","confidence":0.98,'
@@ -32,7 +32,10 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
     with TestClient(app) as client:
         first = client.post(
             "/api/chat",
-            json={"session_id": "api-test", "message": "为什么扣我钱，赶紧退过来"},
+            json={
+                "session_id": "api-test",
+                "message": "订单号 ORD202405010001，赶紧退过来",
+            },
         )
         assert first.status_code == 200
         assert first.json()["business"] == "refund"
@@ -47,7 +50,7 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         assert body["intent"] == "affirm"
         assert body["action"] == "submit_refund"
         assert body["out"] == "REFUND"
-        assert body["data"]["order_no"] == "A1001"
+        assert body["data"]["order_no"] == "ORD202405010001"
         end_response = client.post("/api/chat", json={"session_id": "api-test", "message": "没有了"})
         assert end_response.status_code == 200
         assert end_response.json()["out"] == "END"

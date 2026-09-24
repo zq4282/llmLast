@@ -86,8 +86,8 @@ prompt: |
   当前状态：ASK_ORDER_INFO
   最近对话：
   系统：暂未查到可退款订单，请提供下单手机号或订单号。
-  用户：手机号是 13800138000
-  输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"13800138000","order_no":null}}
+  用户：手机号是 17600184282
+  输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"17600184282","order_no":null}}
 
 actions:
   - state: IDLE
@@ -97,6 +97,10 @@ actions:
     next: CONFIRM_REFUND
     out: CHAT
     on_error:
+      missing_order_query:
+        reply: ask_order_info
+        next: ASK_ORDER_INFO
+        out: CHAT
       order_not_found:
         reply: ask_order_info
         next: ASK_ORDER_INFO
@@ -108,6 +112,10 @@ actions:
     next: CONFIRM_REFUND
     out: CHAT
     on_error:
+      missing_order_query:
+        reply: retry_order_info
+        next: ASK_ORDER_INFO
+        out: CHAT
       order_not_found:
         reply: retry_order_info
         next: ASK_ORDER_INFO
@@ -118,6 +126,15 @@ actions:
     reply: done
     next: ASK_OTHER
     out: REFUND
+    on_error:
+      already_refunded:
+        reply: already_done
+        next: ASK_OTHER
+        out: CHAT
+      order_not_found:
+        reply: ask_order_info
+        next: ASK_ORDER_INFO
+        out: CHAT
   - state: CONFIRM_REFUND
     intent: negate
     do: none

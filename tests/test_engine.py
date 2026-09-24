@@ -1,3 +1,4 @@
+from app.engine.graph import reply
 from app.engine.loader import plugin_loader
 
 
@@ -26,3 +27,26 @@ def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:
     assert end_transition is not None
     assert end_transition.next_state == "END"
     assert end_transition.out == "END"
+
+
+def test_known_action_error_uses_dsl_before_global_fallback() -> None:
+    state = {
+        "business": "refund",
+        "plugin_state": "ASK_ORDER_INFO",
+        "intent": "provide_info",
+        "context": {},
+        "slots": {"order_no": "NOT_FOUND"},
+        "action_result": {"ok": False, "error": "order_not_found"},
+    }
+
+    configured = reply(state)
+    fallback = reply(
+        {
+            **state,
+            "action_result": {"ok": False, "error": "upstream_timeout"},
+        }
+    )
+
+    assert configured["reply"].startswith("根据您提供的信息仍未查到订单")
+    assert configured["plugin_state"] == "ASK_ORDER_INFO"
+    assert fallback["reply"] == "抱歉，我没太听明白，您能再说一遍吗？"

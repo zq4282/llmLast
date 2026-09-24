@@ -2,7 +2,11 @@
 
 from typing import Any
 
-from app.engine.action_result import ActionResult, action_failure, action_success
+from app.engine.action_result import (
+    ActionResult,
+    action_failure,
+    action_success,
+)
 from app.integrations import order_api, refund_api
 
 
@@ -19,21 +23,22 @@ def query_order(state: dict[str, Any]) -> ActionResult:
     """退款流程中的订单校验能力，也可被后续动作表直接引用。"""
 
     values = {**state.get("context", {}), **state.get("slots", {})}
-    order_no = values.get("order_no")
-    backup_phone = values.get("backup_phone")
-    if order_no:
-        order = order_api.query_order(str(order_no))
-    elif backup_phone:
-        order = order_api.query_order_by_phone(str(backup_phone))
-    else:
-        order = order_api.query_current_order()
+    query_params: dict[str, str] = {}
+    if values.get("order_no"):
+        query_params["order_no"] = str(values["order_no"])
+    if values.get("backup_phone"):
+        query_params["phone"] = str(values["backup_phone"])
+
+    # 由本轮 state 动态组装参数，实际调用形如 query_order(order_no=...)。
+    order = order_api.query_order(**query_params)
     order = _use_order_no(order)
+    data = {
+        key: value
+        for key, value in order.items()
+        if key not in {"ok", "error"}
+    }
     if not order.get("ok"):
-        return action_failure(
-            str(order.get("error", "unknown")),
-            **{key: value for key, value in order.items() if key not in {"ok", "error"}},
-        )
-    data = {key: value for key, value in order.items() if key != "ok"}
+        return action_failure(str(order.get("error", "internal_error")), **data)
     data["merchant"] = order.get("merchant", order.get("item", "未知商户"))
     return action_success(**data)
 
@@ -46,16 +51,24 @@ def submit_refund(state: dict[str, Any]) -> ActionResult:
     result = _use_order_no(
         refund_api.submit_refund(order_no.upper(), values.get("reason", "用户申请"))
     )
-    data = {key: value for key, value in result.items() if key not in {"ok", "error"}}
+    data = {
+        key: value
+        for key, value in result.items()
+        if key not in {"ok", "error"}
+    }
     if not result.get("ok"):
-        return action_failure(str(result.get("error", "unknown")), **data)
+        return action_failure(str(result.get("error", "internal_error")), **data)
     data.setdefault("eta", "1-3 个工作日")
     return action_success(**data)
 
 
 def query_refund(state: dict[str, Any]) -> ActionResult:
     result = _use_order_no(refund_api.query_refund(state["slots"]["order_no"].upper()))
-    data = {key: value for key, value in result.items() if key not in {"ok", "error"}}
+    data = {
+        key: value
+        for key, value in result.items()
+        if key not in {"ok", "error"}
+    }
     if not result.get("ok"):
-        return action_failure(str(result.get("error", "unknown")), **data)
+        return action_failure(str(result.get("error", "internal_error")), **data)
     return action_success(**data)
