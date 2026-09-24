@@ -185,7 +185,6 @@ class IntentLLM:
         for placeholder, value in replacements.items():
             prompt = prompt.replace(placeholder, value)
 
-        print(plugin.name + " 提示词\n" + prompt)
         content = self.client.chat([{"role": "user", "content": prompt}])
         if not isinstance(content, str):
             raise LLMAPIError(f"插件 {plugin.name} 模型返回了非文本内容")
