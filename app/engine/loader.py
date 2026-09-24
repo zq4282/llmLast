@@ -1,4 +1,4 @@
-"""发现、校验并加载状态机业务插件。"""
+"""读取各业务的配置文件，提前检查配置，并按配置找到要执行的动作。"""
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -10,6 +10,7 @@ from typing import Any, Callable
 import yaml
 
 from app.engine.action_result import ActionResult, action_success, validate_action_result
+from app.engine.constants import ActionName, OTHER_HANDLER_NAME, RecoveryTrigger
 from app.engine.outputs import DialogueOutput, OUTPUT_NAMES
 from app.engine.recovery import RecoveryStep, SYSTEM_FALLBACKS
 from app.engine.route_tasks import ROUTE_TASKS
@@ -98,6 +99,8 @@ class Plugin:
 
 
 class PluginLoader:
+    """把业务目录里的 YAML 和提示词整理成引擎可直接使用的插件。"""
+
     def __init__(self, businesses_dir: Path | None = None) -> None:
         self.businesses_dir = businesses_dir or Path(__file__).parents[1] / "businesses"
         self._plugins: dict[str, Plugin] = {}
@@ -106,6 +109,8 @@ class PluginLoader:
         self._lock = RLock()
 
     def load_all(self, *, force: bool = False) -> dict[str, Plugin]:
+        """第一次使用时加载全部插件；只有明确要求时才重新读取。"""
+
         with self._lock:
             if self._plugins and not force:
                 return dict(self._plugins)
@@ -113,6 +118,7 @@ class PluginLoader:
             route_tasks: dict[str, str] = {}
             for config_path in sorted(self.businesses_dir.glob("*/plugin.yaml")):
                 plugin = self._load_one(config_path)
+                # 名称和顶层任务必须一一对应，否则路由后不知道该选哪个插件。
                 if plugin.name in plugins:
                     raise PluginConfigError(f"业务插件重名: {plugin.name}")
                 previous = route_tasks.get(plugin.route_task)
@@ -130,6 +136,8 @@ class PluginLoader:
             return dict(plugins)
 
     def _load_one(self, path: Path) -> Plugin:
+        """读取一个插件，启动前就检查状态、动作、话术是否对得上。"""
+
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError) as exc:
@@ -144,13 +152,13 @@ class PluginLoader:
             ) from exc
 
         if kind == PluginKind.OVERLAY:
+            # other 只处理这一句，不需要普通业务那套状态和动作表。
             return self._load_overlay(path, raw)
 
         required = {
             "name",
             "route_task",
             "states",
-            "prompt",
             "actions",
             "templates",
             "fallbacks",
@@ -159,6 +167,7 @@ class PluginLoader:
         missing = required - raw.keys()
         if missing:
             raise PluginConfigError(f"{path} 缺少字段: {', '.join(sorted(missing))}")
+        prompt = self._load_prompt(path, raw)
 
         states = tuple(str(item) for item in raw["states"])
         if not states:
@@ -175,6 +184,7 @@ class PluginLoader:
 
         transitions: list[TransitionConfig] = []
         transition_keys: set[tuple[str, str]] = set()
+        # 每条规则都由“当前状态 + 用户意图”唯一确定，不能出现两种动作。
         for index, config in enumerate(raw["actions"]):
             required_fields = {"state", "intent", "do", "reply", "next", "out"}
             missing_fields = required_fields - config.keys()
@@ -259,10 +269,11 @@ class PluginLoader:
                         f"{error_code} 引用了未知话术 {error_transition.reply}"
                     )
 
+        # 恢复步骤也在加载时检查，避免聊到一半才发现没有可用话术。
         raw_recovery = raw["recovery"]
         if not isinstance(raw_recovery, dict):
             raise PluginConfigError(f"{path}: recovery 必须是对象")
-        required_recovery_triggers = {"unknown", "unsupported"}
+        required_recovery_triggers = set(RecoveryTrigger)
         missing_recovery_triggers = required_recovery_triggers - raw_recovery.keys()
         if missing_recovery_triggers:
             raise PluginConfigError(
@@ -338,7 +349,7 @@ class PluginLoader:
             kind=kind,
             states=states,
             terminal_states=terminal_states,
-            prompt=str(raw["prompt"]),
+            prompt=prompt,
             transitions=tuple(transitions),
             templates=templates,
             fallbacks=fallbacks,
@@ -350,10 +361,11 @@ class PluginLoader:
         )
 
     def _load_overlay(self, path: Path, raw: dict[str, Any]) -> Plugin:
-        required = {"name", "route_task", "prompt"}
+        required = {"name", "route_task"}
         missing = required - raw.keys()
         if missing:
             raise PluginConfigError(f"{path} 缺少字段: {', '.join(sorted(missing))}")
+        prompt = self._load_prompt(path, raw)
         route_task = str(raw["route_task"]).strip().upper()
         if route_task not in ROUTE_TASKS:
             allowed_tasks = ", ".join(sorted(ROUTE_TASKS))
@@ -368,7 +380,7 @@ class PluginLoader:
             kind=PluginKind.OVERLAY,
             states=(),
             terminal_states=frozenset(),
-            prompt=str(raw["prompt"]),
+            prompt=prompt,
             transitions=(),
             templates={},
             fallbacks={},
@@ -380,15 +392,41 @@ class PluginLoader:
         )
 
     @staticmethod
+    def _load_prompt(path: Path, raw: dict[str, Any]) -> str:
+        """提示词可以写在 YAML 中，也可以单独放文件，但只能选一种。"""
+
+        has_inline = "prompt" in raw
+        has_file = "prompt_file" in raw
+        if has_inline == has_file:
+            raise PluginConfigError(f"{path}: 必须且只能配置 prompt 或 prompt_file")
+        if has_inline:
+            prompt = str(raw["prompt"])
+        else:
+            # 只接受同目录文件名，避免误读其他业务或别的路径下的文件。
+            file_name = str(raw["prompt_file"]).strip()
+            if file_name in {"", ".", ".."} or Path(file_name).name != file_name:
+                raise PluginConfigError(f"{path}: prompt_file 必须是插件目录下的文件名")
+            prompt_path = path.parent / file_name
+            try:
+                prompt = prompt_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise PluginConfigError(f"无法加载 {prompt_path}: {exc}") from exc
+        if not prompt.strip():
+            raise PluginConfigError(f"{path}: 提示词不能为空")
+        return prompt
+
+    @staticmethod
     def _load_workflow_policies(
         path: Path,
         raw: dict[str, Any],
         states: tuple[str, ...],
     ) -> tuple[bool, dict[str, StatePolicy]]:
+        """读出每一步能否切换业务，以及回答插话后要不要提醒用户。"""
+
         raw_handlers = raw.get("global_handlers", {})
         if not isinstance(raw_handlers, dict):
             raise PluginConfigError(f"{path}: global_handlers 必须是对象")
-        raw_other = raw_handlers.get("other", {})
+        raw_other = raw_handlers.get(OTHER_HANDLER_NAME, {})
         if not isinstance(raw_other, dict):
             raise PluginConfigError(f"{path}: global_handlers.other 必须是对象")
         other_enabled = bool(raw_other.get("enabled", True))
@@ -434,7 +472,7 @@ class PluginLoader:
             raise PluginConfigError(f"未知业务插件: {name}") from exc
 
     def get_by_route_task(self, task: str) -> Plugin:
-        """只按模型返回的 Task 映射插件，不在程序中重新猜测意图。"""
+        """模型选了哪项业务，就查那项业务对应的插件。"""
 
         normalized_task = task.strip().upper()
         plugins = self.plugins
@@ -449,19 +487,20 @@ class PluginLoader:
         action: str,
         state: dict[str, Any],
     ) -> ActionResult:
-        """查找并调用 actions.do 指定的业务函数，只执行一个 action。"""
+        """找到配置里写的动作函数，执行一次并检查它的返回值。"""
 
-        if action == "none":
+        if action == ActionName.NONE:
             return action_success()
         plugin = self.get(business)
         cache_key = (business, action)
         handler = self._handlers.get(cache_key)
         if handler is None:
+            # 第一次用到动作时再导入；以后直接复用已找到的函数。
             module = import_module(f"{plugin.module_prefix}.handlers")
             handler = getattr(module, action)
             self._handlers[cache_key] = handler
 
-        # 真正执行 app.businesses.<业务>.handlers 中业务函数的位置。
+        # 这里才真正调用业务代码，前面的步骤只是在选动作。
         result = handler(state)
         return validate_action_result(result, f"{business}.{action}")
 

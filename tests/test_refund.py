@@ -176,7 +176,7 @@ def test_refund_queries_order_with_caller_from_call_info(monkeypatch) -> None:
     assert "19.9元" in result["reply"]
 
 
-def test_refund_keeps_asking_when_supplied_order_is_not_found(monkeypatch) -> None:
+def test_refund_gives_one_final_retry_when_supplied_order_is_not_found(monkeypatch) -> None:
     model = SequenceClient(
         [
             '{"intent":"provide_info","confidence":0.98,'
@@ -197,11 +197,11 @@ def test_refund_keeps_asking_when_supplied_order_is_not_found(monkeypatch) -> No
             "context": {},
         }
     )
-    assert result["plugin_state"] == "ASK_ORDER_INFO"
+    assert result["plugin_state"] == "RETRY_ORDER_INFO"
     assert result["out"] == "CHAT"
     assert result["action_result"]["ok"] is False
     assert result["action_result"]["error"] == "order_not_found"
-    assert "仍未查到订单" in result["reply"]
+    assert "仍未查到可办理退款的订单" in result["reply"]
     assert "order_no" not in result["context"]
 
     recovered = run_graph(

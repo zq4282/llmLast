@@ -1,7 +1,7 @@
 import pytest
 
-from app.businesses.refund import handlers
-from app.businesses.refund.handlers import query_order
+from app.services import order_lookup
+from app.services.order_lookup import query_order
 
 
 def test_query_order_accepts_dynamic_order_number() -> None:
@@ -105,7 +105,7 @@ def test_query_order_passes_current_plugin_name_to_order_api(
             "amount": 299.0,
         }
 
-    monkeypatch.setattr(handlers, "_find_order", fake_find_order)
+    monkeypatch.setattr(order_lookup, "_find_order", fake_find_order)
 
     result = query_order(
         {
@@ -141,7 +141,7 @@ def test_query_order_filters_subscription_status_by_plugin(
 ) -> None:
     order_no = "PLUGIN_FILTER_ORDER"
     monkeypatch.setitem(
-        handlers._ORDERS,
+        order_lookup._ORDERS,
         order_no,
         {
             "order_no": order_no,
@@ -187,7 +187,7 @@ def test_query_order_rejects_unpaid_or_already_processed_refund(
 ) -> None:
     order_no = "INELIGIBLE_ORDER"
     monkeypatch.setitem(
-        handlers._ORDERS,
+        order_lookup._ORDERS,
         order_no,
         {
             "order_no": order_no,
@@ -225,7 +225,7 @@ def test_phone_query_returns_latest_matching_order_after_plugin_filter(
 ) -> None:
     phone = "13900000000"
     monkeypatch.setitem(
-        handlers._PHONE_ORDERS,
+        order_lookup._PHONE_ORDERS,
         phone,
         {
             "ELIGIBLE_ORDER": {

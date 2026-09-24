@@ -1,4 +1,4 @@
-"""LangGraph 在五个节点之间传递的状态。"""
+"""说明一轮对话会传递哪些数据，以及哪些数据要留到下一轮。"""
 
 from enum import StrEnum
 from typing import Any, TypedDict
@@ -51,6 +51,9 @@ class ChatState(TypedDict, total=False):
     tenant_id: int
     # 【跨轮必需】通话元数据；所有图节点及业务 Handler 共享，随会话持久化。
     call_info: CallInfoState
+    # 【单轮可选】回复约束和 other 问答所需的系统提示词。
+    system_prompt: str
+    config: dict[str, Any]
 
     # ===== 顶层路由（跨轮共享） =====
     # 【必需】已选中的插件名，例如 refund；值不对应插件时下一轮重新路由。
@@ -62,6 +65,8 @@ class ChatState(TypedDict, total=False):
     active_flow_id: str | None
     # 【跨轮可选】需要用户确认后才能执行的插件切换。
     pending_switch: dict[str, Any] | None
+    # 【跨轮可选】已完成的业务动作，用于组合流程避免重复执行。
+    completed_actions: list[dict[str, Any]]
 
     # ===== 会话恢复控制（跨轮共享） =====
     # 连续未理解或当前插件无法处理的次数；匹配有效业务动作后立即清零。
@@ -96,7 +101,7 @@ class ChatState(TypedDict, total=False):
     handled_by: str
 
     # ===== 执行与回复（单轮临时/最终输出） =====
-    # 【本轮需要】run_action 调用业务 API 后的结果，reply 用于填充话术和更新 context。
+    # 【本轮需要】业务函数返回的结果，供回复节点填入话术并更新已知信息。
     action_result: ActionResult
     # 【最终输出】对用户的回复文本。
     reply: str

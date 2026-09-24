@@ -1,4 +1,4 @@
-"""意图识别与可选真实 LLM 调用。"""
+"""把用户的话交给模型，分别判断要办哪项业务、这句话是什么意思。"""
 
 import json
 import re
@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.engine.constants import OtherDecisionType, OtherIntent, SwitchDecisionType
 from app.engine.loader import Plugin
 from app.engine.route_tasks import (
     ROUTE_TASKS,
@@ -17,6 +18,7 @@ from app.integrations.llm_api import LLMAPIError, OpenAICompatibleClient
 
 TASKS = ROUTE_TASKS
 
+# 顶层只选业务，不查询订单，也不直接决定办理结果。
 TASK_ROUTER_PROMPT = """# Role
 
 语音客服系统的【任务路由识别器 Task Router】。
@@ -100,7 +102,7 @@ class LLMSettings(BaseSettings):
 
 
 class IntentLLM:
-    """顶层任务路由和插件内意图识别均交给模型，程序不猜测意图。"""
+    """让模型负责分类；程序只检查模型回答是否符合约定格式。"""
 
     def __init__(self) -> None:
         settings = LLMSettings()
@@ -117,7 +119,7 @@ class IntentLLM:
         )
 
     def classify_route(self, message: str, history: list[dict[str, str]]) -> RouteDecision:
-        """只做 Task 分类。是否复用已有结果由 router 节点通过共享状态决定。"""
+        """只判断要办哪项业务；已有业务是否继续由外层流程决定。"""
 
         if self.client is None:
             raise LLMAPIError("未配置 LLM_API_KEY，无法执行顶层路由")
@@ -128,6 +130,7 @@ class IntentLLM:
             message: str,
             history: list[dict[str, str]],
     ) -> RouteDecision:
+        # 只带上一轮客服回复，短句如“就这个”才有足够上下文可判断。
         previous_assistant = next(
             (item.get("content", "") for item in reversed(history) if item.get("role") == "assistant"),
             "",
@@ -158,6 +161,8 @@ class IntentLLM:
 
     @staticmethod
     def _parse_json_object(content: str) -> dict[str, Any]:
+        """去掉模型偶尔附带的代码框，再确认内容确实是 JSON 对象。"""
+
         cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
         data = json.loads(cleaned)
         if not isinstance(data, dict):
@@ -172,6 +177,8 @@ class IntentLLM:
             context: dict[str, Any],
             history: list[dict[str, str]],
     ) -> IntentDecision:
+        """用当前业务的提示词理解这一句，不在这里执行任何业务动作。"""
+
         if self.client is None:
             raise LLMAPIError("未配置 LLM_API_KEY，无法执行插件意图识别")
         return self._understand_with_llm(message, plugin, plugin_state, context, history)
@@ -184,6 +191,7 @@ class IntentLLM:
             context: dict[str, Any],
             history: list[dict[str, str]],
     ) -> IntentDecision:
+        # 插件只看最近十条对话，避免旧话题干扰当前业务判断。
         history_text = "\n".join(
             f"{'系统' if item.get('role') == 'assistant' else '用户'}：{item.get('content', '')}"
             for item in history[-10:]
@@ -216,6 +224,7 @@ class IntentLLM:
             raise LLMAPIError(f"插件 {plugin.name} 模型返回的 slots 不是 object")
         if not 0.0 <= confidence <= 1.0:
             raise LLMAPIError(f"插件 {plugin.name} 模型返回非法 confidence: {confidence!r}")
+        # 没提到的字段不写入结果，避免把已有订单号等信息清空。
         explicit_slots = {str(key): value for key, value in slots.items() if value is not None}
         return IntentDecision(intent, round(confidence, 2), explicit_slots)
 
@@ -228,7 +237,7 @@ class IntentLLM:
         system_prompt: str = "你是会员业务客服",
         max_reply_len: int = 60,
     ) -> OtherDecision:
-        """调用无状态 other 插件；不传历史、业务状态或业务上下文。"""
+        """让 other 回答当前插话或选新业务，不向它透露原业务进度。"""
 
         if self.client is None:
             raise LLMAPIError("未配置 LLM_API_KEY，无法执行 other 插件")
@@ -255,25 +264,26 @@ class IntentLLM:
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             raise LLMAPIError(f"other 插件模型返回格式错误: {content[:300]!r}") from exc
 
-        if decision == "ANSWER":
+        if decision == OtherDecisionType.ANSWER:
             intent = data.get("intent")
             reply = data.get("reply")
-            if intent not in {"ask_identity", "ask_capability", "ask_company", "chitchat"}:
+            if intent not in set(OtherIntent):
                 raise LLMAPIError(f"other 插件返回未知 intent: {intent!r}")
             if not isinstance(reply, str) or not reply.strip():
                 raise LLMAPIError("other 插件 ANSWER 未返回有效 reply")
-            return OtherDecision("ANSWER", intent, reply.strip(), None)
+            return OtherDecision(OtherDecisionType.ANSWER, intent, reply.strip(), None)
 
-        if decision == "ROUTE":
+        if decision == OtherDecisionType.ROUTE:
+            # 只能转到已经装好的业务；模型编出的任务名不能直接执行。
             target_task = str(data.get("target_task", "")).strip().upper()
             if target_task not in available_tasks:
                 raise LLMAPIError(f"other 插件返回不可用 target_task: {target_task!r}")
-            return OtherDecision("ROUTE", None, None, target_task)
+            return OtherDecision(OtherDecisionType.ROUTE, None, None, target_task)
 
         raise LLMAPIError(f"other 插件返回未知 decision: {decision!r}")
 
     def confirm_switch(self, message: str) -> SwitchConfirmationDecision:
-        """只判断用户是否确认切换业务，不借用任一业务插件的意图。"""
+        """只判断用户是同意切换、取消切换，还是没有说清楚。"""
 
         if self.client is None:
             raise LLMAPIError("未配置 LLM_API_KEY，无法确认插件切换")
@@ -289,9 +299,9 @@ class IntentLLM:
             decision = str(data.get("decision", "")).strip().upper()
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             raise LLMAPIError(f"切换确认模型返回格式错误: {content[:300]!r}") from exc
-        if decision not in {"CONFIRM", "CANCEL", "UNKNOWN"}:
+        if decision not in set(SwitchDecisionType):
             raise LLMAPIError(f"切换确认模型返回未知 decision: {decision!r}")
-        return SwitchConfirmationDecision(decision)
+        return SwitchConfirmationDecision(SwitchDecisionType(decision))
 
 
 intent_llm = IntentLLM()

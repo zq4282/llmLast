@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.businesses.refund.handlers import query_order
+from app.services.order_lookup import query_order
 from app.engine.action_result import ActionResult, action_success
 
 

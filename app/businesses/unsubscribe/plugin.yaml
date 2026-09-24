@@ -9,6 +9,7 @@ states:
   - IDLE
   - CONFIRM_UNSUBSCRIBE
   - ASK_ORDER_INFO
+  - RETRY_ORDER_INFO # 补充信息后仍查不到，最后再核对一次。
   - ASK_OTHER
   - END
 
@@ -18,10 +19,12 @@ state_policies:
   IDLE:
     switch_policy: allow
   CONFIRM_UNSUBSCRIBE:
-    switch_policy: confirm
+    switch_policy: allow
     remind_after_other: true
     reminder: "刚才的退订还在等待确认，请回复“退订”或“不退订”。"
   ASK_ORDER_INFO:
+    switch_policy: allow
+  RETRY_ORDER_INFO:
     switch_policy: allow
   ASK_OTHER:
     switch_policy: allow
@@ -44,86 +47,7 @@ recovery:
     - reply: unsupported_handoff
       out: HUMAN
 
-prompt: |
-  你是退订客服系统的意图识别模块。该流程只处理取消订阅和停止后续自动续费，不处理已支付费用的退款。你只负责理解用户说的话，不负责回复用户，不决定是否退订，不调用任何工具，不输出对外动作。
-
-  当前状态：{state}
-  当前已查到的订单信息：{context}
-  最近对话：
-  {history}
-  用户当前说：{user_input}
-
-  你的任务：
-  1. 结合最近对话和当前状态，判断用户当前这句话的意图。
-  2. 抽取用户明确说出的槽位。
-  3. 只输出 JSON，不要 Markdown，不要解释，不要输出 JSON 以外的任何内容。
-
-  意图范围：
-  - unsubscribe_request：用户只要求退订、取消订阅、关闭自动续费或停止后续续费，不要求退回已经支付的费用。
-  - provide_info：用户主动提供手机号或订单号。
-  - affirm：用户同意、确认，包括"退订吧/可以/好/行/同意/就是那笔/对/是"。
-  - negate：用户拒绝、否定，包括"不用/别退订/先不取消/不是/不对"。
-  - other：能够理解具体含义、但不属于当前退订流程的其他咨询、问题或抱怨，例如咨询发票、退款、物流。
-  - end：用户表示没有其他问题，包括"没有了/没了/没事了/就这样"。
-  - human：用户要求转人工、找客服、投诉。
-  - unknown：乱码、随机字符、无意义重复或结合上下文仍无法判断，例如"asdfasdf"、"qwer123"。不得将无明确语义的内容判为 other。
-
-  槽位定义：
-  - backup_phone：用户说的手机号，11 位数字，没有则 null。
-  - order_no：用户说的订单号，没有则 null。
-
-  输出格式：
-  {
-    "intent": "unsubscribe_request",
-    "confidence": 0.0,
-    "slots": {
-      "backup_phone": null,
-      "order_no": null
-    }
-  }
-
-  判断规则：
-  1. 必须结合最近对话判断。用户说"就是那笔/对/是"，如果上一轮系统在问"是否退订"，应判 affirm。
-  2. 用户说"不是/不对"，如果上一轮系统在确认订单，应判 negate。
-  3. 用户说"退订吧/可以/好/行/同意"，当前状态是 CONFIRM_UNSUBSCRIBE，判 affirm。
-  4. 用户说"不用了/先不退订/别取消"，当前状态是 CONFIRM_UNSUBSCRIBE，判 negate。
-  5. 用户说"没有了/没了/没事了"，当前状态是 ASK_OTHER，判 end。
-  6. 用户说"15838996373"或"手机号是15838996373"，判 provide_info，slots.backup_phone=15838996373。
-  7. 用户说"订单号是ORD123"或"ORD123"，判 provide_info，slots.order_no=ORD123。
-  8. 用户说"取消订阅/关闭自动续费/下个月别续了"，判 unsubscribe_request。
-  9. 用户说"转人工/找客服/投诉"，判 human。
-  10. 不要编造手机号、订单号、金额、时间，用户没说的槽位一律 null。
-  11. 不确定就输出 unknown，confidence 低于 0.6，不要猜。
-  12. 不要输出 CHAT/REFUND/UNSUBSCRIBE/REFUND_UNSUBSCRIBE/HUMAN/END，这些由程序决定。
-  13. 只输出 JSON。
-  14. other 必须具有可复述的明确语义；乱码、随机字母数字、无意义字符必须判 unknown，confidence 低于 0.6。
-  15. 退订仅表示停止后续订阅或自动续费，不等同于退款。用户只要求退回已支付费用时判 other；同时要求退款和退订时也判 other，交由其他业务流程处理。
-
-  示例：
-  当前状态：IDLE
-  最近对话：（无）
-  用户：把这个会员退订了，下个月别再续费
-  输出：{"intent":"unsubscribe_request","confidence":0.96,"slots":{"backup_phone":null,"order_no":null}}
-
-  当前状态：CONFIRM_UNSUBSCRIBE
-  最近对话：
-  用户：我要关闭自动续费
-  系统：查到您的专业版年度会员订阅，是否确认退订？
-  用户：就是这个
-  输出：{"intent":"affirm","confidence":0.95,"slots":{"backup_phone":null,"order_no":null}}
-
-  当前状态：ASK_OTHER
-  最近对话：
-  用户：退订吧
-  系统：已为您退订，还有其他疑问吗？
-  用户：没有了
-  输出：{"intent":"end","confidence":0.97,"slots":{"backup_phone":null,"order_no":null}}
-
-  当前状态：ASK_ORDER_INFO
-  最近对话：
-  系统：暂未查到可退订订单，请提供下单手机号或订单号。
-  用户：手机号是 15838996373
-  输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"15838996373","order_no":null}}
+prompt_file: prompt.md
 
 actions:
   - state: IDLE
@@ -141,6 +65,19 @@ actions:
         reply: ask_order_info
         next: ASK_ORDER_INFO
         out: CHAT
+  # 重复表达办理诉求时继续收集信息，不重新查询或消耗核对次数。
+  - state: ASK_ORDER_INFO
+    intent: unsubscribe_request
+    do: none
+    reply: continue_order_info
+    next: ASK_ORDER_INFO
+    out: CHAT
+  - state: RETRY_ORDER_INFO
+    intent: unsubscribe_request
+    do: none
+    reply: continue_retry_order_info
+    next: RETRY_ORDER_INFO
+    out: CHAT
   - state: ASK_ORDER_INFO
     intent: provide_info
     do: query_order
@@ -150,12 +87,66 @@ actions:
     on_error:
       missing_order_query:
         reply: retry_order_info
-        next: ASK_ORDER_INFO
+        next: RETRY_ORDER_INFO
         out: CHAT
       order_not_found:
         reply: retry_order_info
-        next: ASK_ORDER_INFO
+        next: RETRY_ORDER_INFO
         out: CHAT
+  # 最后一次核对仍失败就转人工，不能一直要求用户重复提供信息。
+  - state: RETRY_ORDER_INFO
+    intent: provide_info
+    do: query_order
+    reply: confirm
+    next: CONFIRM_UNSUBSCRIBE
+    out: CHAT
+    on_error:
+      missing_order_query:
+        reply: order_lookup_handoff
+        next: END
+        out: HUMAN
+      order_not_found:
+        reply: order_lookup_handoff
+        next: END
+        out: HUMAN
+  # 用户已经拿不出查询信息时，交给人工继续核实。
+  - state: ASK_ORDER_INFO
+    intent: unable_to_provide
+    do: none
+    reply: no_order_info_handoff
+    next: END
+    out: HUMAN
+  - state: RETRY_ORDER_INFO
+    intent: unable_to_provide
+    do: none
+    reply: no_order_info_handoff
+    next: END
+    out: HUMAN
+  # 收集信息时也允许用户明确取消或结束。
+  - state: ASK_ORDER_INFO
+    intent: negate
+    do: none
+    reply: cancel_order_lookup
+    next: END
+    out: END
+  - state: RETRY_ORDER_INFO
+    intent: negate
+    do: none
+    reply: cancel_order_lookup
+    next: END
+    out: END
+  - state: ASK_ORDER_INFO
+    intent: end
+    do: none
+    reply: end
+    next: END
+    out: END
+  - state: RETRY_ORDER_INFO
+    intent: end
+    do: none
+    reply: end
+    next: END
+    out: END
   - state: CONFIRM_UNSUBSCRIBE
     intent: affirm
     do: submit_unsubscribe
@@ -184,22 +175,27 @@ actions:
 templates:
   confirm: "我查到您订购了{merchant}，是否确认退订并停止后续自动续费？本次操作不涉及已支付费用的退款。"
   ask_order_info: "暂未查到可退订订单，请提供下单手机号或订单号，我再为您查询。"
-  retry_order_info: "根据您提供的信息仍未查到订单，请核对后重新提供手机号或订单号。"
+  continue_order_info: "好的，继续为您处理退订，请提供下单手机号或订单号，我再为您查询。"
+  continue_retry_order_info: "好的，继续为您处理退订。请再核对一次下单手机号或订单号；若仍查不到，我将为您转人工核实。"
+  retry_order_info: "根据您提供的信息仍未查到可办理退订的订单，请再核对一次手机号或订单号；若仍查不到，我将为您转人工核实退订问题。"
+  order_lookup_handoff: "核对后仍未查到可办理退订的订单，正在为您转接人工客服进一步核实退订问题，请稍候。"
+  no_order_info_handoff: "了解，您暂时无法提供查询信息，退订申请还无法继续，正在为您转接人工客服核实，请稍候。"
+  cancel_order_lookup: "好的，已停止本次退订的订单查询和办理，感谢您的来电。"
   done: "已为您退订{merchant}，{effective_time}，后续将不再自动续费。本次退订不涉及已支付费用的退款。请问还有其他疑问吗？"
   cancel: "已取消本次退订操作，还有其他问题吗？"
   already_done: "这项订阅已经退订，后续不会再自动续费。"
-  end: "感谢您的来电，祝您生活愉快。"
+  end: "本次退订服务已结束，感谢您的来电，祝您生活愉快。"
 
 fallbacks:
-  human: "正在为您转接人工，请稍候。"
-  unknown: "抱歉，我没太听明白，您能再说一遍吗？"
-  end: "本次服务已结束，感谢您的来电。"
-  unknown_first: "抱歉，我没太听明白。请根据上一条提示重新回答。"
-  unknown_second: "抱歉，我还是没能理解。请再回答一次，或直接说“转人工”。"
-  unknown_handoff: "还是没能理解您的意思，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
-  unsupported_first: "当前流程无法处理这句话，请根据上一条提示重新回答。"
-  unsupported_second: "当前流程仍无法处理您的回复。请再回答一次，或直接说“转人工”。"
-  unsupported_handoff: "当前流程无法继续处理，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
+  human: "正在为您转接人工客服继续处理退订问题，请稍候。"
+  unknown: "抱歉，我没太听明白您的退订诉求，您能再说一遍吗？"
+  end: "本次退订服务已结束，感谢您的来电。"
+  unknown_first: "抱歉，我没太听明白您的退订诉求，请根据上一条提示重新回答。"
+  unknown_second: "抱歉，我还是没能理解您的退订诉求。请再回答一次，或直接说“转人工”。"
+  unknown_handoff: "还是没能理解您的退订诉求，正在为您转接人工客服核实退订问题，本次沟通记录已同步，请稍候。"
+  unsupported_first: "当前退订流程无法处理这句话，请根据上一条提示重新回答。"
+  unsupported_second: "当前退订流程仍无法处理您的回复。请再回答一次，或直接说“转人工”。"
+  unsupported_handoff: "当前退订流程无法继续处理，正在为您转接人工客服核实退订问题，本次沟通记录已同步，请稍候。"
   idle_unknown_first: "抱歉，我没有理解您的回复。请说明您需要退订、查询订阅，还是转人工客服。"
   idle_unknown_second: "请直接说明“申请退订”或“转人工”。如果仍无法识别，我将为您转接人工客服。"
   idle_unsupported_first: "当前退订流程无法处理这项内容。请说明是否继续申请退订，或回复“转人工”。"
@@ -208,11 +204,12 @@ fallbacks:
   confirm_unsubscribe_unknown_second: "请直接回复“退订”“不退订”或“转人工”，我再继续为您处理。"
   confirm_unsubscribe_unsupported_first: "当前正在确认是否退订{merchant}。请回复“退订”“不退订”，或说“转人工”。"
   confirm_unsubscribe_unsupported_second: "请直接回复“退订”“不退订”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
-  ask_order_info_unknown_first: "我没有识别到有效的手机号或订单号，请重新提供下单手机号或订单号。"
-  ask_order_info_unknown_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。"
-  ask_order_info_unsupported_first: "当前需要下单手机号或订单号才能继续查询，请重新提供，或回复“转人工”。"
-  ask_order_info_unsupported_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"
-  ask_other_unknown_first: "我没有理解您的回复。若没有其他问题请回复“没有了”，也可以直接说“转人工”。"
-  ask_other_unknown_second: "请回复“没有了”结束服务，或回复“转人工”。"
+  ask_order_info_unknown_first: "办理退订需要下单手机号或订单号，我没有识别到有效信息，请重新提供。"
+  ask_order_info_unknown_second: "为了查询可办理退订的订单，请直接提供11位下单手机号、订单号，或回复“转人工”。"
+  ask_order_info_unsupported_first: "当前退订申请还在等待订单信息，请提供下单手机号或订单号，或回复“转人工”。"
+  ask_order_info_unsupported_second: "办理退订前需要定位订单。请提供11位下单手机号、订单号，或回复“转人工”；若仍无法继续，我将为您转接人工客服。"
+  ask_other_unknown_first: "本次退订申请已经提交，我没有理解您接下来的问题。若没有其他问题请回复“没有了”，也可以说“转人工”。"
+  ask_other_unknown_second: "本次退订申请已经提交。请回复“没有了”结束服务，或回复“转人工”。"
   ask_other_unsupported_first: "退订流程已经处理完成。若没有其他问题请回复“没有了”，其他业务可回复“转人工”。"
-  ask_other_unsupported_second: "请回复“没有了”结束服务，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  ask_other_unsupported_second: "本次退订申请已经提交。请回复“没有了”结束服务，或回复“转人工”；若仍无法继续，我将为您转接人工客服。"
+  human_handoff: "正在为您转接人工客服继续处理退订问题，本次沟通记录已同步，请稍候。"

@@ -7,8 +7,33 @@
 router → understand → decide → run_action → reply
 ```
 
-退款、退订、退款并退订和转人工流程均为 YAML workflow 插件。新增业务时只需在
-`app/businesses/` 下增加 `plugin.yaml` 与 `handlers.py`，无需修改流程图。
+退款、退订、退款并退订和转人工流程均为 YAML workflow 插件。新增业务时在
+`route_tasks.py` 登记顶层 Task，并在 `app/businesses/` 下增加 `plugin.yaml`、
+`prompt.md` 与 `handlers.py`；共享流程图无需修改。
+
+## 引擎代码结构
+
+`app/engine/` 的核心对象各负责一件事：
+
+- `WorkflowGraph`：只定义五节点的固定拓扑，以及 `other` 的退出位置。
+- `RouterNode`、`UnderstandNode`、`DecisionNode`、`ActionNode`、`ReplyNode`：
+  分别处理单轮的路由、理解、决策、执行和回复。
+- `DialogueEngine`：串起一轮请求，处理 `other` 插话和业务切换。
+- `FlowManager`：负责跨轮流程快照的创建、恢复、切换和完成。
+
+`constants.py` 集中维护固定的状态字段、流程状态和引擎内部取值；
+`loader.py` 负责加载和校验插件，`llm.py` 负责模型请求，`state.py` 定义图状态。
+常规业务轮次由 `DialogueEngine` 调用共享图；识别到 `other` 时，图在 `understand`
+后返回，由 `DialogueEngine` 处理插话或切换。
+
+图拓扑、状态协议、流程生命周期和对外输出属于稳定的引擎规则；不同业务的状态、
+意图、动作、提示词及话术放在 `app/businesses/` 的插件目录中；顶层 Task
+定义放在 `route_tasks.py`。新增业务不增加新的引擎分支或节点类。
+
+每个业务目录用 `plugin.yaml` 定义状态与动作，用 `prompt.md` 保存模型提示词，并由
+`prompt_file: prompt.md` 引用；加载器也兼容旧的内联 `prompt`。退款、退订及组合业务
+共用的订单查询放在 `app/services/order_lookup.py`，各插件通过自己的 `handlers.py`
+暴露 `query_order` 动作。
 
 `other` 是单独的无状态 overlay 插件。顶级路由未匹配固定业务，或者活动业务插件
 返回 `other` 时，引擎临时调用它。它可以直接生成身份、能力、公司主体或闲聊回答，
@@ -39,6 +64,14 @@ state_policies:
 会话通过 `flows` 保存流程快照，状态包含 `ACTIVE`、`SUSPENDED`、`COMPLETED`、
 `CANCELLED` 和 `SUPERSEDED`。兼容字段 `business/plugin_state/context` 始终投影当前
 ACTIVE 流程，旧客户端无需修改。
+
+## 订单查询失败后的处理
+
+退款、退订和退款并退订都使用同一套有限重试规则：首次查询失败进入
+`ASK_ORDER_INFO`，请用户补充手机号或订单号；补充后仍失败进入
+`RETRY_ORDER_INFO`，再给一次核对机会。最后一次仍失败时返回 `HUMAN`，
+关闭当前活动流程，由人工继续核实。查询成功则正常进入业务确认。
+用户明确无法提供信息时直接转人工；明确取消或结束时返回 `END`。
 
 ## 运行
 
@@ -89,8 +122,8 @@ curl -X POST http://127.0.0.1:8000/api/chat \
 uv run pytest
 ```
 
-`plugin.yaml` 中 `do` 配置的业务动作统一实现在同插件目录的 `handlers.py` 中，
-不再通过额外的业务接口文件转调。生产环境可在这些 Handler 内按需接入真实服务。
+`plugin.yaml` 中 `do` 配置的业务动作统一由同插件目录的 `handlers.py` 暴露。
+共用能力放在 `app/services/`，生产环境可在这些服务中接入真实接口。
 
 ## Redis 会话状态
 

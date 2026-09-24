@@ -44,7 +44,7 @@ def test_other_answers_without_creating_active_flow(monkeypatch) -> None:
     assert "当前已查到" not in other_prompt
 
 
-def test_other_is_overlay_and_engine_appends_state_reminder(monkeypatch) -> None:
+def test_other_is_overlay_and_keeps_active_flow(monkeypatch) -> None:
     model = SequenceClient(
         [
             '{"intent":"other","confidence":0.96,"slots":{}}',
@@ -69,7 +69,7 @@ def test_other_is_overlay_and_engine_appends_state_reminder(monkeypatch) -> None
     assert result["plugin_state"] == "CONFIRM_REFUND"
     assert result["out"] == "CHAT"
     assert "我可以协助处理会员业务问题" in result["reply"]
-    assert "退款还在等待确认" in result["reply"]
+    assert "退款还在等待确认" not in result["reply"]
     assert result["flows"][0]["status"] == "ACTIVE"
 
 
@@ -101,19 +101,18 @@ def test_other_can_correct_top_router_and_enter_workflow_same_turn(monkeypatch) 
     assert len(model.calls) == 3
 
 
-def test_other_route_uses_confirm_policy_and_preserves_source_flow(monkeypatch) -> None:
+def test_other_route_uses_allow_policy_and_preserves_source_flow(monkeypatch) -> None:
     model = SequenceClient(
         [
             '{"intent":"other","confidence":0.96,"slots":{}}',
             '{"decision":"ROUTE","intent":null,"reply":null,'
             '"target_task":"UNSUBSCRIBE"}',
-            '{"decision":"CONFIRM"}',
             '{"intent":"unsubscribe_request","confidence":0.98,'
             '"slots":{"backup_phone":null,"order_no":null}}',
         ]
     )
     monkeypatch.setattr(intent_llm, "client", model)
-    first = run_graph(
+    result = run_graph(
         {
             "message": "我还要退订",
             "history": [],
@@ -123,31 +122,15 @@ def test_other_route_uses_confirm_policy_and_preserves_source_flow(monkeypatch) 
         }
     )
 
-    assert first["intent"] == "confirm_switch"
-    assert first["pending_switch"]["target_business"] == "unsubscribe"
-    assert first["flows"][0]["status"] == "ACTIVE"
-
-    second = run_graph(
-        {
-            "message": "确认切换",
-            "history": [],
-            "business": first["business"],
-            "plugin_state": first["plugin_state"],
-            "context": first["context"],
-            "flows": first["flows"],
-            "active_flow_id": first["active_flow_id"],
-            "pending_switch": first["pending_switch"],
-        }
-    )
-
-    source, target = second["flows"]
+    source, target = result["flows"]
     assert source["business"] == "refund"
     assert source["status"] == "SUSPENDED"
     assert source["plugin_state"] == "CONFIRM_REFUND"
     assert target["business"] == "unsubscribe"
     assert target["status"] == "ACTIVE"
-    assert second["active_flow_id"] == target["flow_id"]
-    assert second["business"] == "unsubscribe"
+    assert result["active_flow_id"] == target["flow_id"]
+    assert result["business"] == "unsubscribe"
+    assert result["pending_switch"] is None
 
 
 def test_combined_flow_supersedes_refund_and_reuses_completed_action(monkeypatch) -> None:

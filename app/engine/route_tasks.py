@@ -1,4 +1,4 @@
-"""顶层路由 Task 的单一配置源。"""
+"""列出顶层路由能选的业务，以及每种业务该怎么判断。"""
 
 from app.engine.outputs import DialogueOutput
 
@@ -11,9 +11,10 @@ ROUTE_TASK_HUMAN = DialogueOutput.HUMAN.value
 ROUTE_TASK_UNKNOWN = "UNKNOWN"
 
 
+# 这份说明既给顶层路由模型看，也给 other 的二次分流使用。
 ROUTE_TASK_DEFINITIONS = {
     ROUTE_TASK_REFUND_UNSUBSCRIBE: """同时明确要求退回已经扣除的费用，并停止订阅或后续自动续费。
-  - *典型表达*：不要扣钱了下个月也不要扣了 / 这次扣的钱退给我以后也别扣了 / 退款并取消订阅 / 钱退回来下个月不要再续费 / 退钱再退订。
+  - *典型表达*：把扣的钱退回来下个月也不要扣了 / 这次扣的钱退给我以后也别扣了 / 退款并取消订阅 / 钱退回来下个月不要再续费 / 退钱再退订。
   - *边界*：必须同时包含“退回已扣费用”和“停止未来订阅/扣费”两个明确诉求；只有其中一个诉求时分别判定为 REFUND 或 UNSUBSCRIBE。""",
     ROUTE_TASK_REFUND: """明确要求退款、退费、撤销或退回已产生账单。
   - *典型表达*：退款 / 退钱（含 ASR 错字：退前、退狂） / 把198元退掉 / 取消这笔扣款。

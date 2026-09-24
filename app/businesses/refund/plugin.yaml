@@ -15,6 +15,7 @@ states:
   - IDLE             # 初始状态，尚未开始查询或确认退款。
   - CONFIRM_REFUND   # 已查到订单，等待用户确认是否退款。
   - ASK_ORDER_INFO   # 缺少订单定位信息，等待手机号或订单号。
+  - RETRY_ORDER_INFO # 补充信息后仍查不到，最后再核对一次。
   - ASK_OTHER        # 退款已提交，询问用户是否还有其他问题。
   - END              # 退款会话已经结束。
 
@@ -29,13 +30,15 @@ state_policies:
     switch_policy: allow
   # 已进入退款确认环节，切换前必须征得用户同意。
   CONFIRM_REFUND:
-    switch_policy: confirm
+    switch_policy: allow
     # other 回答闲聊后，是否由引擎追加当前退款流程提醒。
-    remind_after_other: true
+    remind_after_other: false
     # 追加提醒模板；由引擎生成，other 插件本身看不到退款上下文。
     reminder: "刚才的退款还在等待确认，请回复“退款”或“不退款”。"
   # 收集订单信息时允许切换；原退款流程会保存为 SUSPENDED。
   ASK_ORDER_INFO:
+    switch_policy: allow
+  RETRY_ORDER_INFO:
     switch_policy: allow
   # 当前退款动作已经完成，可以直接进入其他业务。
   ASK_OTHER:
@@ -71,91 +74,7 @@ recovery:
 # - {context}：跨轮保存的订单及业务上下文。
 # - {history}：最近对话历史。
 # - {user_input}：本轮用户原始输入。
-prompt: |
-  你是退款客服系统的意图识别模块。你只负责理解用户说的话，不负责回复用户，不决定是否退款，不调用任何工具，不输出对外动作。
-
-  当前状态：{state}
-  当前已查到的订单信息：{context}
-  最近对话：
-  {history}
-  用户当前说：{user_input}
-
-  你的任务：
-  1. 结合最近对话和当前状态，判断用户当前这句话的意图。
-  2. 抽取用户明确说出的槽位。
-  3. 只输出 JSON，不要 Markdown，不要解释，不要输出 JSON 以外的任何内容。
-
-  意图范围：
-  - refund_request：用户要求退款、质问扣款、问为什么扣钱、说赶紧退、退我钱。
-  - provide_info：用户主动提供手机号或订单号。
-  - affirm：用户同意、确认，包括"退了吧/可以/好/行/同意/就是那笔/对/是/推了"。
-  - negate：用户拒绝、否定，包括"不用/别退/先不退/不是/不对"。
-  - other：能够理解具体含义、但不属于当前退款流程的其他咨询、问题或抱怨，例如咨询发票、套餐、物流。
-  - end：用户表示没有其他问题，包括"没有了/没了/没事了/就这样"。
-  - human：用户要求转人工、找客服、投诉。
-  - unknown：乱码、随机字符、无意义重复或结合上下文仍无法判断，例如"asdfasdf"、"qwer123"。不得将无明确语义的内容判为 other。
-
-  槽位定义：
-  - backup_phone：用户说的手机号，11 位数字，没有则 null。
-  - order_no：用户说的订单号，没有则 null。
-
-  输出格式：
-  {
-    "intent": "refund_request",
-    "confidence": 0.0,
-    "slots": {
-      "backup_phone": null,
-      "order_no": null
-    }
-  }
-
-  判断规则：
-  1. 必须结合最近对话判断。用户说"就是那笔/对/是"，如果上一轮系统在问"是否退款"，应判 affirm。
-  2. 用户说"不是/不对"，如果上一轮系统在确认订单，应判 negate。
-  3. 用户说"退了吧/可以/好/行/同意"，当前状态是 CONFIRM_REFUND，判 affirm。
-  4. 用户说"不用了/先不退/别退"，当前状态是 CONFIRM_REFUND，判 negate。
-  5. 用户说"没有了/没了/没事了"，当前状态是 ASK_OTHER，判 end。
-  6. 用户说"15838996373"或"手机号是15838996373"，判 provide_info，slots.backup_phone=15838996373。
-  7. 用户说"订单号是ORD123"或"ORD123"，判 provide_info，slots.order_no=ORD123。
-  8. 用户说"为什么扣钱/赶紧退/退我钱"，判 refund_request。
-  9. 用户说"转人工/找客服/投诉"，判 human。
-  10. 不要编造手机号、订单号、金额、时间，用户没说的槽位一律 null。
-  11. 不确定就输出 unknown，confidence 低于 0.6，不要猜。
-  12. 不要输出 CHAT/REFUND/UNSUBSCRIBE/REFUND_UNSUBSCRIBE/HUMAN/END，这些由程序决定。
-  13. 只输出 JSON。
-  14. other 必须具有可复述的明确语义；乱码、随机字母数字、无意义字符必须判 unknown，confidence 低于 0.6。
-
-  示例：
-  当前状态：IDLE
-  最近对话：（无）
-  用户：为什么扣我钱，赶紧退过来
-  输出：{"intent":"refund_request","confidence":0.93,"slots":{"backup_phone":null,"order_no":null}}
-
-  当前状态：CONFIRM_REFUND
-  最近对话：
-  用户：为什么扣我钱？
-  系统：查到您一笔 29.9 元扣款，是否退款？
-  用户：就是那笔
-  输出：{"intent":"affirm","confidence":0.95,"slots":{"backup_phone":null,"order_no":null}}
-
-  当前状态：ASK_OTHER
-  最近对话：
-  用户：退了吧
-  系统：已提交退款，还有其他疑问吗？
-  用户：没有了
-  输出：{"intent":"end","confidence":0.97,"slots":{"backup_phone":null,"order_no":null}}
-
-  当前状态：ASK_ORDER_INFO
-  最近对话：
-  系统：暂未查到可退款订单，请提供下单手机号或订单号。
-  用户：手机号是 15838996373
-  输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"15838996373","order_no":null}}
-
-  当前状态：CONFIRM_REFUND
-  最近对话：
-  系统：查到您一笔 19.9 元扣款，是否退款？
-  用户：asdfasdf
-  输出：{"intent":"unknown","confidence":0.10,"slots":{"backup_phone":null,"order_no":null}}
+prompt_file: prompt.md
 
 # 状态动作表：通过“当前 state + 模型 intent”唯一确定动作、回复、下一状态和输出。
 # 每条动作中的字段含义：
@@ -186,6 +105,19 @@ actions:
         reply: ask_order_info
         next: ASK_ORDER_INFO
         out: CHAT
+  # 重复表达办理诉求时继续收集信息，不重新查询或消耗核对次数。
+  - state: ASK_ORDER_INFO
+    intent: refund_request
+    do: none
+    reply: continue_order_info
+    next: ASK_ORDER_INFO
+    out: CHAT
+  - state: RETRY_ORDER_INFO
+    intent: refund_request
+    do: none
+    reply: continue_retry_order_info
+    next: RETRY_ORDER_INFO
+    out: CHAT
   # 用户补充订单号或手机号后，再次查询订单。
   - state: ASK_ORDER_INFO
     intent: provide_info
@@ -196,12 +128,66 @@ actions:
     on_error:
       missing_order_query:
         reply: retry_order_info
-        next: ASK_ORDER_INFO
+        next: RETRY_ORDER_INFO
         out: CHAT
       order_not_found:
         reply: retry_order_info
-        next: ASK_ORDER_INFO
+        next: RETRY_ORDER_INFO
         out: CHAT
+  # 最后一次核对仍失败就转人工，不能一直要求用户重复提供信息。
+  - state: RETRY_ORDER_INFO
+    intent: provide_info
+    do: query_order
+    reply: confirm
+    next: CONFIRM_REFUND
+    out: CHAT
+    on_error:
+      missing_order_query:
+        reply: order_lookup_handoff
+        next: END
+        out: HUMAN
+      order_not_found:
+        reply: order_lookup_handoff
+        next: END
+        out: HUMAN
+  # 用户已经拿不出查询信息时，交给人工继续核实。
+  - state: ASK_ORDER_INFO
+    intent: unable_to_provide
+    do: none
+    reply: no_order_info_handoff
+    next: END
+    out: HUMAN
+  - state: RETRY_ORDER_INFO
+    intent: unable_to_provide
+    do: none
+    reply: no_order_info_handoff
+    next: END
+    out: HUMAN
+  # 收集信息时也允许用户明确取消或结束。
+  - state: ASK_ORDER_INFO
+    intent: negate
+    do: none
+    reply: cancel_order_lookup
+    next: END
+    out: END
+  - state: RETRY_ORDER_INFO
+    intent: negate
+    do: none
+    reply: cancel_order_lookup
+    next: END
+    out: END
+  - state: ASK_ORDER_INFO
+    intent: end
+    do: none
+    reply: end
+    next: END
+    out: END
+  - state: RETRY_ORDER_INFO
+    intent: end
+    do: none
+    reply: end
+    next: END
+    out: END
   # 用户确认退款：提交退款，成功后进入“是否还有其他问题”。
   - state: CONFIRM_REFUND
     intent: affirm
@@ -239,7 +225,12 @@ templates:
   # 首次缺少订单定位信息。
   ask_order_info: "暂未查到可退款订单，请提供下单手机号或订单号，我再为您查询。"
   # 用户补充信息后仍未找到订单。
-  retry_order_info: "根据您提供的信息仍未查到订单，请核对后重新提供手机号或订单号。"
+  continue_order_info: "好的，继续为您处理退款，请提供下单手机号或订单号，我再为您查询。"
+  continue_retry_order_info: "好的，继续为您处理退款。请再核对一次下单手机号或订单号；若仍查不到，我将为您转人工核实。"
+  retry_order_info: "根据您提供的信息仍未查到可办理退款的订单，请再核对一次手机号或订单号；若仍查不到，我将为您转人工核实退款问题。"
+  order_lookup_handoff: "核对后仍未查到可办理退款的订单，正在为您转接人工客服进一步核实退款问题，请稍候。"
+  no_order_info_handoff: "了解，您暂时无法提供查询信息，退款申请还无法继续，正在为您转接人工客服核实，请稍候。"
+  cancel_order_lookup: "好的，已停止本次退款的订单查询和办理，感谢您的来电。"
   # submit_refund 成功，eta 来自动作结果。
   done: "已为您提交退款，预计{eta}到账，具体到账时间以账单为准。请问还有其他疑问吗？"
   # 用户在确认环节拒绝退款。
@@ -247,25 +238,25 @@ templates:
   # 防止 ASK_OTHER 状态重复提交退款。
   already_done: "这笔退款已经提交过了，预计{eta}到账，您可以在账单里查看。"
   # 用户明确结束服务。
-  end: "感谢您的来电，祝您生活愉快。"
+  end: "本次退款服务已结束，感谢您的来电，祝您生活愉快。"
 
 # 兜底话术表；用于 human、unknown、unsupported、终态或业务错误场景。
 # 状态专属 key 遵循“状态名小写_恢复话术 key”，优先于通用 key。
 fallbacks:
   # 当前退款插件内识别到 human 时使用，不会切换到独立 human 插件。
-  human: "正在为您转接人工，请稍候。"
+  human: "正在为您转接人工客服继续处理退款问题，请稍候。"
   # 未指定分级恢复 key 时的通用无法理解话术。
-  unknown: "抱歉，我没太听明白，您能再说一遍吗？"
+  unknown: "抱歉，我没太听明白您的退款诉求，您能再说一遍吗？"
   # 终态通用话术。
-  end: "本次服务已结束，感谢您的来电。"
+  end: "本次退款服务已结束，感谢您的来电。"
   # unknown 的第 1、2 次恢复以及最终人工升级话术。
-  unknown_first: "抱歉，我没太听明白。请根据上一条提示重新回答。"
-  unknown_second: "抱歉，我还是没能理解。请再回答一次，或直接说“转人工”。"
-  unknown_handoff: "还是没能理解您的意思，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
+  unknown_first: "抱歉，我没太听明白您的退款诉求，请根据上一条提示重新回答。"
+  unknown_second: "抱歉，我还是没能理解您的退款诉求。请再回答一次，或直接说“转人工”。"
+  unknown_handoff: "还是没能理解您的退款诉求，正在为您转接人工客服核实退款问题，本次沟通记录已同步，请稍候。"
   # unsupported 的第 1、2 次恢复以及最终人工升级话术。
-  unsupported_first: "当前流程无法处理这句话，请根据上一条提示重新回答。"
-  unsupported_second: "当前流程仍无法处理您的回复。请再回答一次，或直接说“转人工”。"
-  unsupported_handoff: "当前流程无法继续处理，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
+  unsupported_first: "当前退款流程无法处理这句话，请根据上一条提示重新回答。"
+  unsupported_second: "当前退款流程仍无法处理您的回复。请再回答一次，或直接说“转人工”。"
+  unsupported_handoff: "当前退款流程无法继续处理，正在为您转接人工客服核实退款问题，本次沟通记录已同步，请稍候。"
   # IDLE 状态覆盖通用 unknown/unsupported，使提示更贴合退款入口。
   idle_unknown_first: "抱歉，我没有理解您的回复。请说明您需要查询扣款、申请退款，还是转人工客服。"
   idle_unknown_second: "请直接说明“申请退款”或“转人工”。如果仍无法识别，我将为您转接人工客服。"
@@ -277,12 +268,13 @@ fallbacks:
   confirm_refund_unsupported_first: "当前正在确认这笔{amount}元扣款。请回复“退款”“不退款”，或说“转人工”。"
   confirm_refund_unsupported_second: "请直接回复“退款”“不退款”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
   # ASK_ORDER_INFO 状态覆盖，提示用户补充可查询的订单信息。
-  ask_order_info_unknown_first: "我没有识别到有效的手机号或订单号，请重新提供下单手机号或订单号。"
-  ask_order_info_unknown_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。"
-  ask_order_info_unsupported_first: "当前需要下单手机号或订单号才能继续查询，请重新提供，或回复“转人工”。"
-  ask_order_info_unsupported_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  ask_order_info_unknown_first: "办理退款需要下单手机号或订单号，我没有识别到有效信息，请重新提供。"
+  ask_order_info_unknown_second: "为了查询可办理退款的订单，请直接提供11位下单手机号、订单号，或回复“转人工”。"
+  ask_order_info_unsupported_first: "当前退款申请还在等待订单信息，请提供下单手机号或订单号，或回复“转人工”。"
+  ask_order_info_unsupported_second: "办理退款前需要定位订单。请提供11位下单手机号、订单号，或回复“转人工”；若仍无法继续，我将为您转接人工客服。"
   # ASK_OTHER 状态覆盖，提示用户结束或转人工；明确的新业务由 other 负责路由。
-  ask_other_unknown_first: "我没有理解您的回复。若没有其他问题请回复“没有了”，也可以直接说“转人工”。"
-  ask_other_unknown_second: "请回复“没有了”结束服务，或回复“转人工”。"
+  ask_other_unknown_first: "本次退款申请已经提交，我没有理解您接下来的问题。若没有其他问题请回复“没有了”，也可以说“转人工”。"
+  ask_other_unknown_second: "本次退款申请已经提交。请回复“没有了”结束服务，或回复“转人工”。"
   ask_other_unsupported_first: "退款流程已经处理完成。若没有其他问题请回复“没有了”，其他业务可回复“转人工”。"
-  ask_other_unsupported_second: "请回复“没有了”结束服务，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  ask_other_unsupported_second: "本次退款申请已经提交。请回复“没有了”结束服务，或回复“转人工”；若仍无法继续，我将为您转接人工客服。"
+  human_handoff: "正在为您转接人工客服继续处理退款问题，本次沟通记录已同步，请稍候。"
