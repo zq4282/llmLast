@@ -6,6 +6,8 @@ from enum import StrEnum
 class DialogueOutput(StrEnum):
     CHAT = "CHAT"
     REFUND = "REFUND"
+    UNSUBSCRIBE = "UNSUBSCRIBE"
+    REFUND_UNSUBSCRIBE = "REFUND_UNSUBSCRIBE"
     HUMAN = "HUMAN"
     END = "END"
 

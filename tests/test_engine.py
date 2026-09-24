@@ -8,11 +8,23 @@ from app.engine.outputs import ALLOWED_OUTPUTS
 
 
 def test_all_plugins_are_loaded() -> None:
-    assert set(plugin_loader.load_all(force=True)) == {"human", "refund"}
+    assert set(plugin_loader.load_all(force=True)) == {
+        "human",
+        "refund",
+        "unsubscribe",
+        "refund_unsubscribe",
+    }
 
 
-def test_external_outputs_are_limited_to_four_values() -> None:
-    assert ALLOWED_OUTPUTS == {"CHAT", "REFUND", "HUMAN", "END"}
+def test_external_outputs_include_business_action_values() -> None:
+    assert ALLOWED_OUTPUTS == {
+        "CHAT",
+        "REFUND",
+        "UNSUBSCRIBE",
+        "REFUND_UNSUBSCRIBE",
+        "HUMAN",
+        "END",
+    }
 
 
 def test_plugin_rejects_unknown_output(tmp_path: Path) -> None:
@@ -80,6 +92,45 @@ def test_human_plugin_asks_reason_before_handoff() -> None:
     assert with_reason.action == "record_reason"
     assert with_reason.next_state == "END"
     assert with_reason.out == "HUMAN"
+
+
+def test_unsubscribe_plugin_matches_refund_flow_shape() -> None:
+    plugin = plugin_loader.get("unsubscribe")
+
+    assert plugin.route_task == "UNSUBSCRIBE"
+    assert plugin.states == (
+        "IDLE",
+        "CONFIRM_UNSUBSCRIBE",
+        "ASK_ORDER_INFO",
+        "ASK_OTHER",
+        "END",
+    )
+    initial_lookup = plugin.transition_for("IDLE", "unsubscribe_request")
+    assert initial_lookup is not None
+    assert initial_lookup.action == "query_order"
+    assert initial_lookup.next_state == "CONFIRM_UNSUBSCRIBE"
+
+    confirmed = plugin.transition_for("CONFIRM_UNSUBSCRIBE", "affirm")
+    assert confirmed is not None
+    assert confirmed.action == "submit_unsubscribe"
+    assert confirmed.next_state == "ASK_OTHER"
+    assert confirmed.out == "UNSUBSCRIBE"
+
+
+def test_refund_unsubscribe_plugin_combines_both_actions() -> None:
+    plugin = plugin_loader.get("refund_unsubscribe")
+
+    assert plugin.route_task == "REFUND_UNSUBSCRIBE"
+    initial_lookup = plugin.transition_for("IDLE", "refund_unsubscribe_request")
+    assert initial_lookup is not None
+    assert initial_lookup.action == "query_order"
+    assert initial_lookup.next_state == "CONFIRM_REFUND_UNSUBSCRIBE"
+
+    confirmed = plugin.transition_for("CONFIRM_REFUND_UNSUBSCRIBE", "affirm")
+    assert confirmed is not None
+    assert confirmed.action == "submit_refund_unsubscribe"
+    assert confirmed.next_state == "ASK_OTHER"
+    assert confirmed.out == "REFUND_UNSUBSCRIBE"
 
 
 def test_recovery_step_count_is_derived_from_config(tmp_path: Path) -> None:

@@ -74,7 +74,7 @@ prompt: |
   9. 只判断是否存在辱骂，不要自行计算 insult_count，计数由程序完成。
   10. 当前状态是 AFTER_CANCEL 时，只要用户出现明确辱骂就判为 insult；用户改变主意要求转人工就判为 transfer_request；其他有明确语义的内容判为 other。
   11. 当前状态是 CONFIRM_TRANSFER 时，用户说“要/需要/转吧/好”判为 transfer_request；说“不要/不用/算了”判为 negate。
-  12. 不要输出 CHAT、REFUND、HUMAN 或 END，这些由程序决定。
+  12. 不要输出 CHAT、REFUND、UNSUBSCRIBE、REFUND_UNSUBSCRIBE、HUMAN 或 END，这些由程序决定。
 
   示例：
   当前状态：IDLE

@@ -7,7 +7,7 @@
 router → understand → decide → run_action → reply
 ```
 
-退款和转人工流程均为 YAML 插件。新增业务时只需在
+退款、退订、退款并退订和转人工流程均为 YAML 插件。新增业务时只需在
 `app/businesses/` 下增加 `plugin.yaml` 与 `handlers.py`，无需修改流程图。
 
 ## 运行
@@ -78,8 +78,8 @@ Redis 不可用时应用启动失败或聊天接口返回 503，不会静默降�
 
 ## 连续未理解恢复
 
-接口 `out` 固定为 `CHAT`、`REFUND`、`HUMAN`、`END` 四种，不接受其他值。
-`CHAT` 和 `REFUND` 会继续保留当前会话上下文；`HUMAN` 和 `END` 是终态，本轮回复
+接口 `out` 固定为 `CHAT`、`REFUND`、`UNSUBSCRIBE`、`REFUND_UNSUBSCRIBE`、`HUMAN`、`END` 六种，不接受其他值。
+`CHAT`、`REFUND`、`UNSUBSCRIBE` 和 `REFUND_UNSUBSCRIBE` 会继续保留当前会话上下文；`HUMAN` 和 `END` 是终态，本轮回复
 返回后立即删除当前租户、当前 `sessionId` 的业务状态、上下文、历史和恢复计数。
 其中主动要求人工和恢复步骤最终升级都返回 `HUMAN`。
 

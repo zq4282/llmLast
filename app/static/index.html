@@ -70,14 +70,14 @@
             <div class="empty-state" id="empty-state">
               <div class="empty-state__glyph" aria-hidden="true">&gt;_</div>
               <h3>从一条业务消息开始</h3>
-              <p>例如“我要退款”或“查询 2026 年 09 月账单”。多轮回复会保留在当前会话。</p>
+              <p>例如“我要退款”“关闭自动续费”或“退款后下个月也别扣了”。多轮回复会保留在当前会话。</p>
             </div>
           </div>
 
           <form class="composer" id="chat-form" novalidate>
             <label for="message-input">用户消息</label>
             <div class="composer__field">
-              <textarea id="message-input" name="message" rows="3" maxlength="4000" placeholder="输入退款、查询或停机保号请求" aria-describedby="message-help" required>为啥扣我23元，我要退款</textarea>
+              <textarea id="message-input" name="message" rows="3" maxlength="4000" placeholder="输入退款、退订、查询或转人工请求" aria-describedby="message-help" required>为啥扣我23元，我要退款</textarea>
               <div class="composer__meta">
                 <span id="message-help">Enter 发送 · Shift + Enter 换行</span>
                 <span id="character-count">12 / 4000</span>
@@ -153,6 +153,12 @@
           <p id="command-title">选择一条消息填入输入框</p>
           <button class="command-item" type="button" role="option" data-prompt="我要申请退款">
             <span>退款 · 第一步</span><code>我要申请退款</code>
+          </button>
+          <button class="command-item" type="button" role="option" data-prompt="我要退订并关闭自动续费">
+            <span>退订 · 第一步</span><code>我要退订并关闭自动续费</code>
+          </button>
+          <button class="command-item" type="button" role="option" data-prompt="这次扣的钱退给我，下个月也不要再扣了">
+            <span>退款并退订</span><code>退款后不再续费</code>
           </button>
           <button class="command-item" type="button" role="option" data-prompt="订单号 ORD202405010001，因为买错了">
             <span>退款 · 补充订单</span><code>ORD202405010001，因为买错了</code>

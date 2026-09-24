@@ -65,7 +65,7 @@ class ChatState(TypedDict, total=False):
     reply_key: str
     # 【必需】actions.next；成功后写回 plugin_state，失败时可由 on_error 覆盖。
     next_plugin_state: str
-    # 【必需】actions.out，对外标识 CHAT/REFUND/HUMAN/END。
+    # 【必需】actions.out，对外标识 CHAT/REFUND/UNSUBSCRIBE/REFUND_UNSUBSCRIBE/HUMAN/END。
     out: DialogueOutput
     # 【单轮临时】转人工原因，仅随 HUMAN 响应返回，不持久化。
     handoff_reason: str | None

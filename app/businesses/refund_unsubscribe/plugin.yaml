@@ -1,9 +1,9 @@
-name: refund
-route_task: REFUND
+name: refund_unsubscribe
+route_task: REFUND_UNSUBSCRIBE
 
 states:
   - IDLE
-  - CONFIRM_REFUND
+  - CONFIRM_REFUND_UNSUBSCRIBE
   - ASK_ORDER_INFO
   - ASK_OTHER
   - END
@@ -27,7 +27,7 @@ recovery:
       out: HUMAN
 
 prompt: |
-  你是退款客服系统的意图识别模块。你只负责理解用户说的话，不负责回复用户，不决定是否退款，不调用任何工具，不输出对外动作。
+  你是退款并退订客服系统的意图识别模块。你只负责理解用户说的话，不负责回复用户，不决定是否退款或退订，不调用任何工具，不输出对外动作。
 
   当前状态：{state}
   当前已查到的订单信息：{context}
@@ -41,11 +41,11 @@ prompt: |
   3. 只输出 JSON，不要 Markdown，不要解释，不要输出 JSON 以外的任何内容。
 
   意图范围：
-  - refund_request：用户要求退款、质问扣款、问为什么扣钱、说赶紧退、退我钱。
+  - refund_unsubscribe_request：用户同时要求退回已扣费用，并退订、关闭自动续费或停止后续扣费。
   - provide_info：用户主动提供手机号或订单号。
-  - affirm：用户同意、确认，包括"退了吧/可以/好/行/同意/就是那笔/对/是/推了"。
-  - negate：用户拒绝、否定，包括"不用/别退/先不退/不是/不对"。
-  - other：能够理解具体含义、但不属于当前退款流程的其他咨询、问题或抱怨，例如咨询发票、套餐、物流。
+  - affirm：用户确认同时退款并退订，包括"都办/一起办/可以/好/行/同意/就是那笔/对/是"。
+  - negate：用户拒绝或取消本次操作，包括"不用/算了/先不办/不是/不对"。
+  - other：能够理解具体含义、但不属于当前退款并退订流程的其他咨询、问题或抱怨。
   - end：用户表示没有其他问题，包括"没有了/没了/没事了/就这样"。
   - human：用户要求转人工、找客服、投诉。
   - unknown：乱码、随机字符、无意义重复或结合上下文仍无法判断，例如"asdfasdf"、"qwer123"。不得将无明确语义的内容判为 other。
@@ -56,7 +56,7 @@ prompt: |
 
   输出格式：
   {
-    "intent": "refund_request",
+    "intent": "refund_unsubscribe_request",
     "confidence": 0.0,
     "slots": {
       "backup_phone": null,
@@ -65,14 +65,14 @@ prompt: |
   }
 
   判断规则：
-  1. 必须结合最近对话判断。用户说"就是那笔/对/是"，如果上一轮系统在问"是否退款"，应判 affirm。
+  1. 必须结合最近对话判断。用户说"都办/一起办/对/是"，如果上一轮系统在确认退款并退订，应判 affirm。
   2. 用户说"不是/不对"，如果上一轮系统在确认订单，应判 negate。
-  3. 用户说"退了吧/可以/好/行/同意"，当前状态是 CONFIRM_REFUND，判 affirm。
-  4. 用户说"不用了/先不退/别退"，当前状态是 CONFIRM_REFUND，判 negate。
+  3. 用户说"可以/好/行/同意"，当前状态是 CONFIRM_REFUND_UNSUBSCRIBE，判 affirm。
+  4. 用户说"不用了/算了/先不办"，当前状态是 CONFIRM_REFUND_UNSUBSCRIBE，判 negate。
   5. 用户说"没有了/没了/没事了"，当前状态是 ASK_OTHER，判 end。
   6. 用户说"15838996373"或"手机号是15838996373"，判 provide_info，slots.backup_phone=15838996373。
   7. 用户说"订单号是ORD123"或"ORD123"，判 provide_info，slots.order_no=ORD123。
-  8. 用户说"为什么扣钱/赶紧退/退我钱"，判 refund_request。
+  8. 用户说"不要扣钱了，下个月也不要扣了"或"把扣的钱退回来，以后也不要再扣了"，判 refund_unsubscribe_request。
   9. 用户说"转人工/找客服/投诉"，判 human。
   10. 不要编造手机号、订单号、金额、时间，用户没说的槽位一律 null。
   11. 不确定就输出 unknown，confidence 低于 0.6，不要猜。
@@ -83,41 +83,33 @@ prompt: |
   示例：
   当前状态：IDLE
   最近对话：（无）
-  用户：为什么扣我钱，赶紧退过来
-  输出：{"intent":"refund_request","confidence":0.93,"slots":{"backup_phone":null,"order_no":null}}
+  用户：不要扣钱了，下个月也不要再扣了
+  输出：{"intent":"refund_unsubscribe_request","confidence":0.98,"slots":{"backup_phone":null,"order_no":null}}
 
-  当前状态：CONFIRM_REFUND
+  当前状态：CONFIRM_REFUND_UNSUBSCRIBE
   最近对话：
-  用户：为什么扣我钱？
-  系统：查到您一笔 29.9 元扣款，是否退款？
-  用户：就是那笔
-  输出：{"intent":"affirm","confidence":0.95,"slots":{"backup_phone":null,"order_no":null}}
+  系统：是否确认退款并退订，停止后续自动续费？
+  用户：对，都办了
+  输出：{"intent":"affirm","confidence":0.97,"slots":{"backup_phone":null,"order_no":null}}
 
   当前状态：ASK_OTHER
   最近对话：
-  用户：退了吧
-  系统：已提交退款，还有其他疑问吗？
+  系统：退款和退订都已提交，还有其他疑问吗？
   用户：没有了
   输出：{"intent":"end","confidence":0.97,"slots":{"backup_phone":null,"order_no":null}}
 
   当前状态：ASK_ORDER_INFO
   最近对话：
-  系统：暂未查到可退款订单，请提供下单手机号或订单号。
+  系统：暂未查到可处理订单，请提供下单手机号或订单号。
   用户：手机号是 15838996373
   输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"15838996373","order_no":null}}
 
-  当前状态：CONFIRM_REFUND
-  最近对话：
-  系统：查到您一笔 19.9 元扣款，是否退款？
-  用户：asdfasdf
-  输出：{"intent":"unknown","confidence":0.10,"slots":{"backup_phone":null,"order_no":null}}
-
 actions:
   - state: IDLE
-    intent: refund_request
+    intent: refund_unsubscribe_request
     do: query_order
     reply: confirm
-    next: CONFIRM_REFUND
+    next: CONFIRM_REFUND_UNSUBSCRIBE
     out: CHAT
     on_error:
       missing_order_query:
@@ -132,7 +124,7 @@ actions:
     intent: provide_info
     do: query_order
     reply: confirm
-    next: CONFIRM_REFUND
+    next: CONFIRM_REFUND_UNSUBSCRIBE
     out: CHAT
     on_error:
       missing_order_query:
@@ -143,20 +135,20 @@ actions:
         reply: retry_order_info
         next: ASK_ORDER_INFO
         out: CHAT
-  - state: CONFIRM_REFUND
+  - state: CONFIRM_REFUND_UNSUBSCRIBE
     intent: affirm
-    do: submit_refund
+    do: submit_refund_unsubscribe
     reply: done
     next: ASK_OTHER
-    out: REFUND
-  - state: CONFIRM_REFUND
+    out: REFUND_UNSUBSCRIBE
+  - state: CONFIRM_REFUND_UNSUBSCRIBE
     intent: negate
     do: none
     reply: cancel
     next: IDLE
     out: CHAT
   - state: ASK_OTHER
-    intent: refund_request
+    intent: refund_unsubscribe_request
     do: none
     reply: already_done
     next: ASK_OTHER
@@ -169,12 +161,12 @@ actions:
     out: END
 
 templates:
-  confirm: "我查到您有一笔{amount}元在{merchant}的扣款，是否需要为您申请退款？"
-  ask_order_info: "暂未查到可退款订单，请提供下单手机号或订单号，我再为您查询。"
+  confirm: "我查到您有一笔{amount}元的{merchant}订单，是否确认退款并退订，同时停止后续自动续费？"
+  ask_order_info: "暂未查到可退款并退订的订单，请提供下单手机号或订单号，我再为您查询。"
   retry_order_info: "根据您提供的信息仍未查到订单，请核对后重新提供手机号或订单号。"
-  done: "已为您提交退款，预计{eta}到账，具体到账时间以账单为准。请问还有其他疑问吗？"
-  cancel: "已取消退款，还有其他问题吗？"
-  already_done: "这笔退款已经提交过了，预计{eta}到账，您可以在账单里查看。"
+  done: "已为您提交退款并退订{merchant}，退订{effective_time}，后续不再自动续费；退款预计{eta}到账。请问还有其他疑问吗？"
+  cancel: "已取消本次退款和退订操作，还有其他问题吗？"
+  already_done: "这笔订单的退款和退订已经提交，后续不会再自动续费，退款预计{eta}到账。"
   end: "感谢您的来电，祝您生活愉快。"
 
 fallbacks:
@@ -187,19 +179,19 @@ fallbacks:
   unsupported_first: "当前流程无法处理这句话，请根据上一条提示重新回答。"
   unsupported_second: "当前流程仍无法处理您的回复。请再回答一次，或直接说“转人工”。"
   unsupported_handoff: "当前流程无法继续处理，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
-  idle_unknown_first: "抱歉，我没有理解您的回复。请说明您需要查询扣款、申请退款，还是转人工客服。"
-  idle_unknown_second: "请直接说明“申请退款”或“转人工”。如果仍无法识别，我将为您转接人工客服。"
-  idle_unsupported_first: "当前退款流程无法处理这项内容。请说明是否继续申请退款，或回复“转人工”。"
-  idle_unsupported_second: "请直接回复“申请退款”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
-  confirm_refund_unknown_first: "我没有理解您的回复。请问是否申请退回这笔{amount}元扣款？请回复“退款”或“不退款”。"
-  confirm_refund_unknown_second: "请直接回复“退款”“不退款”或“转人工”，我再继续为您处理。"
-  confirm_refund_unsupported_first: "当前正在确认这笔{amount}元扣款。请回复“退款”“不退款”，或说“转人工”。"
-  confirm_refund_unsupported_second: "请直接回复“退款”“不退款”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  idle_unknown_first: "抱歉，我没有理解您的回复。请说明是否需要同时退款并退订，或转人工客服。"
+  idle_unknown_second: "请直接说明“退款并退订”或“转人工”。如果仍无法识别，我将为您转接人工客服。"
+  idle_unsupported_first: "当前退款并退订流程无法处理这项内容。请说明是否继续办理，或回复“转人工”。"
+  idle_unsupported_second: "请直接回复“退款并退订”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  confirm_refund_unsubscribe_unknown_first: "我没有理解您的回复。请问是否确认退款并退订{merchant}？请回复“确认”或“取消”。"
+  confirm_refund_unsubscribe_unknown_second: "请直接回复“确认”“取消”或“转人工”，我再继续为您处理。"
+  confirm_refund_unsubscribe_unsupported_first: "当前正在确认退款并退订{merchant}。请回复“确认”“取消”，或说“转人工”。"
+  confirm_refund_unsubscribe_unsupported_second: "请直接回复“确认”“取消”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
   ask_order_info_unknown_first: "我没有识别到有效的手机号或订单号，请重新提供下单手机号或订单号。"
   ask_order_info_unknown_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。"
   ask_order_info_unsupported_first: "当前需要下单手机号或订单号才能继续查询，请重新提供，或回复“转人工”。"
   ask_order_info_unsupported_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"
   ask_other_unknown_first: "我没有理解您的回复。若没有其他问题请回复“没有了”，也可以直接说“转人工”。"
   ask_other_unknown_second: "请回复“没有了”结束服务，或回复“转人工”。"
-  ask_other_unsupported_first: "退款流程已经处理完成。若没有其他问题请回复“没有了”，其他业务可回复“转人工”。"
+  ask_other_unsupported_first: "退款并退订流程已经处理完成。若没有其他问题请回复“没有了”，其他业务可回复“转人工”。"
   ask_other_unsupported_second: "请回复“没有了”结束服务，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"
