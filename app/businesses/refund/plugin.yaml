@@ -29,10 +29,10 @@ prompt: |
   - provide_info：用户主动提供手机号或订单号。
   - affirm：用户同意、确认，包括"退了吧/可以/好/行/同意/就是那笔/对/是"。
   - negate：用户拒绝、否定，包括"不用/别退/先不退/不是/不对"。
-  - other：其他咨询、问题、抱怨。
+  - other：能够理解具体含义、但不属于当前退款流程的其他咨询、问题或抱怨，例如咨询发票、套餐、物流。
   - end：用户表示没有其他问题，包括"没有了/没了/没事了/就这样"。
   - human：用户要求转人工、找客服、投诉。
-  - unknown：无法判断。
+  - unknown：乱码、随机字符、无意义重复或结合上下文仍无法判断，例如"asdfasdf"、"qwer123"。不得将无明确语义的内容判为 other。
 
   槽位定义：
   - backup_phone：用户说的手机号，11 位数字，没有则 null。
@@ -62,6 +62,7 @@ prompt: |
   11. 不确定就输出 unknown，confidence 低于 0.6，不要猜。
   12. 不要输出 CHAT/REFUND/HUMAN/END，这些由程序决定。
   13. 只输出 JSON。
+  14. other 必须具有可复述的明确语义；乱码、随机字母数字、无意义字符必须判 unknown，confidence 低于 0.6。
 
   示例：
   当前状态：IDLE
@@ -88,6 +89,12 @@ prompt: |
   系统：暂未查到可退款订单，请提供下单手机号或订单号。
   用户：手机号是 15838996373
   输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"15838996373","order_no":null}}
+
+  当前状态：CONFIRM_REFUND
+  最近对话：
+  系统：查到您一笔 19.9 元扣款，是否退款？
+  用户：asdfasdf
+  输出：{"intent":"unknown","confidence":0.10,"slots":{"backup_phone":null,"order_no":null}}
 
 actions:
   - state: IDLE
@@ -167,3 +174,19 @@ fallbacks:
   human: "正在为您转接人工，请稍候。"
   unknown: "抱歉，我没太听明白，您能再说一遍吗？"
   end: "本次服务已结束，感谢您的来电。"
+  idle_unknown_first: "抱歉，我没有理解您的回复。请说明您需要查询扣款、申请退款，还是转人工客服。"
+  idle_unknown_second: "请直接说明“申请退款”或“转人工”。如果仍无法识别，我将为您转接人工客服。"
+  idle_unsupported_first: "当前退款流程无法处理这项内容。请说明是否继续申请退款，或回复“转人工”。"
+  idle_unsupported_second: "请直接回复“申请退款”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  confirm_refund_unknown_first: "我没有理解您的回复。请问是否申请退回这笔{amount}元扣款？请回复“退款”或“不退款”。"
+  confirm_refund_unknown_second: "请直接回复“退款”“不退款”或“转人工”，我再继续为您处理。"
+  confirm_refund_unsupported_first: "当前正在确认这笔{amount}元扣款。请回复“退款”“不退款”，或说“转人工”。"
+  confirm_refund_unsupported_second: "请直接回复“退款”“不退款”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  ask_order_info_unknown_first: "我没有识别到有效的手机号或订单号，请重新提供下单手机号或订单号。"
+  ask_order_info_unknown_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。"
+  ask_order_info_unsupported_first: "当前需要下单手机号或订单号才能继续查询，请重新提供，或回复“转人工”。"
+  ask_order_info_unsupported_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  ask_other_unknown_first: "我没有理解您的回复。若没有其他问题请回复“没有了”，也可以直接说“转人工”。"
+  ask_other_unknown_second: "请回复“没有了”结束服务，或回复“转人工”。"
+  ask_other_unsupported_first: "退款流程已经处理完成。若没有其他问题请回复“没有了”，其他业务可回复“转人工”。"
+  ask_other_unsupported_second: "请回复“没有了”结束服务，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"

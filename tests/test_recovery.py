@@ -55,7 +55,7 @@ def test_three_unknown_turns_escalate_and_keep_business_state(monkeypatch) -> No
 
     assert first["unrecognized_count"] == 1
     assert first["out"] == "CHAT"
-    assert "换一种说法" in first["reply"]
+    assert "是否申请退回这笔299.0元扣款" in first["reply"]
     assert second["unrecognized_count"] == 2
     assert "转人工" in second["reply"]
     assert third["unrecognized_count"] == 3
@@ -99,6 +99,70 @@ def test_recognized_intent_resets_unknown_count(monkeypatch) -> None:
     assert recovered["unrecognized_count"] == 0
     assert recovered["action"] == "submit_refund"
     assert recovered["out"] == "REFUND"
+
+
+def test_unknown_during_refund_confirmation_uses_contextual_replies(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"intent":"unknown","confidence":0.10,"slots":{}}',
+            '{"intent":"unknown","confidence":0.08,"slots":{}}',
+        ]
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+    current = {
+        "business": "refund",
+        "plugin_state": "CONFIRM_REFUND",
+        "route_task": "REFUND",
+        "route_confidence": 0.97,
+        "route_locked": True,
+        "context": {"order_no": "ORD202405010001", "amount": 19.9},
+        "unrecognized_count": 0,
+        "conversation_status": "BOT",
+    }
+
+    first = run_graph(_next_turn(current, "asdfasdf"))
+    second = run_graph(_next_turn(first, "qwer123"))
+
+    assert first["plugin_state"] == "CONFIRM_REFUND"
+    assert first["unrecognized_count"] == 1
+    assert "19.9元" in first["reply"]
+    assert "退款”或“不退款" in first["reply"]
+    assert second["unrecognized_count"] == 2
+    assert "退款”“不退款”或“转人工" in second["reply"]
+
+
+def test_unsupported_intent_does_not_repeat_forever(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"intent":"other","confidence":0.90,"slots":{}}',
+            '{"intent":"other","confidence":0.90,"slots":{}}',
+            '{"intent":"other","confidence":0.90,"slots":{}}',
+        ]
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+    current = {
+        "business": "refund",
+        "plugin_state": "CONFIRM_REFUND",
+        "route_task": "REFUND",
+        "route_confidence": 0.97,
+        "route_locked": True,
+        "context": {"order_no": "ORD202405010001", "amount": 19.9},
+        "unrecognized_count": 0,
+        "conversation_status": "BOT",
+    }
+
+    first = run_graph(_next_turn(current, "asdfasdf"))
+    second = run_graph(_next_turn(first, "还是不相关的内容"))
+    third = run_graph(_next_turn(second, "继续不回答"))
+
+    assert first["unrecognized_count"] == 1
+    assert "当前正在确认这笔19.9元扣款" in first["reply"]
+    assert second["unrecognized_count"] == 2
+    assert first["reply"] != second["reply"]
+    assert third["unrecognized_count"] == 3
+    assert third["out"] == "HUMAN"
+    assert third["conversation_status"] == "HANDOFF_PENDING"
+    assert third["handoff_reason"] == "CONSECUTIVE_UNSUPPORTED"
 
 
 def test_router_unknown_uses_recovery_without_loading_plugin(monkeypatch) -> None:

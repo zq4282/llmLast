@@ -49,11 +49,11 @@ class ChatState(TypedDict, total=False):
     plugin_state: str
 
     # ===== 会话恢复控制（跨轮共享） =====
-    # 连续语义未理解次数；识别出有效意图后立即清零。
+    # 连续未理解或当前插件无法处理的次数；匹配有效业务动作后立即清零。
     unrecognized_count: int
     # BOT/HANDOFF_PENDING/HUMAN/ENDED；人工接管后禁止再次进入机器人流程。
     conversation_status: str
-    # 转人工原因，例如 USER_REQUESTED/CONSECUTIVE_UNRECOGNIZED。
+    # 转人工原因，例如 USER_REQUESTED/CONSECUTIVE_UNRECOGNIZED/CONSECUTIVE_UNSUPPORTED。
     handoff_reason: str | None
     # 人工系统返回的接管标识，尚未对接时为空。
     handoff_id: str | None

@@ -17,6 +17,29 @@ from app.engine.render import render_template
 from app.engine.state import ChatState
 
 
+def _use_plugin_recovery_reply(
+    state: ChatState,
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    """优先使用插件按当前状态配置的恢复话术，计数和升级仍由引擎负责。"""
+
+    business = state.get("business")
+    if not business or business not in plugin_loader.plugins:
+        return decision
+    plugin = plugin_loader.get(business)
+    plugin_state = state.get("plugin_state")
+    if plugin_state not in plugin.states:
+        plugin_state = plugin.initial_state
+    contextual_key = f"{plugin_state.lower()}_{decision['reply_key']}"
+    if contextual_key not in plugin.fallbacks:
+        return decision
+    return {
+        **decision,
+        "reply_key": contextual_key,
+        "use_system_fallback": False,
+    }
+
+
 def router(state: ChatState) -> dict[str, Any]:
     """首次由模型选插件；锁定后只读共享状态，不再调用顶层 Router 模型。"""
 
@@ -102,7 +125,7 @@ def decide(state: ChatState) -> dict[str, Any]:
 
     recovery = recovery_decision(dict(state))
     if recovery is not None:
-        return recovery
+        return _use_plugin_recovery_reply(state, recovery)
 
     plugin = plugin_loader.get(state["business"])
     plugin_state = state.get("plugin_state", plugin.initial_state)
@@ -121,17 +144,11 @@ def decide(state: ChatState) -> dict[str, Any]:
 
     transition = plugin.transition_for(plugin_state, state["intent"])
     if transition is None:
-        return {
-            "action": "none",
-            "reply_key": "unsupported_intent",
-            "next_plugin_state": plugin_state,
-            "out": DialogueOutput.CHAT,
-            "use_fallback": True,
-            "use_system_fallback": True,
-            "unrecognized_count": 0,
-            "conversation_status": "BOT",
-            "handoff_reason": None,
-        }
+        # 模型可能把乱码误判成 other，也可能返回插件尚未配置的新意图。
+        # 这两种情况都不能清零并无限重复同一句兜底；保持业务状态并进入分级恢复。
+        unsupported = recovery_decision(dict(state), trigger="unsupported")
+        assert unsupported is not None
+        return _use_plugin_recovery_reply(state, unsupported)
     next_status = "ENDED" if transition.out == DialogueOutput.END else "BOT"
     return {
         "action": transition.action,

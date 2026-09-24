@@ -18,11 +18,23 @@ SYSTEM_FALLBACKS = {
     ),
     "human_handoff": "正在为您转接人工客服，本次沟通记录已同步，请稍候。",
     "human_waiting": "已为您申请转接人工客服，请稍候。",
+    "unsupported_first": "当前流程无法处理这句话，请根据上一条提示重新回答。",
+    "unsupported_second": (
+        "当前流程仍无法处理您的回复。您可以按上一条提示回答，或直接说“转人工”；"
+        "如果仍无法继续，我将为您转接人工客服。"
+    ),
+    "unsupported_handoff": (
+        "当前流程无法继续处理，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
+    ),
     "unsupported_intent": "我理解了您的问题，但当前流程暂时无法处理，您可以换一个问题或转人工客服。",
 }
 
 
-def recovery_decision(state: dict[str, Any]) -> dict[str, Any] | None:
+def recovery_decision(
+    state: dict[str, Any],
+    *,
+    trigger: str | None = None,
+) -> dict[str, Any] | None:
     """为未理解和人工接管生成统一决策；正常业务返回 None。"""
 
     status = str(state.get("conversation_status", "BOT"))
@@ -50,13 +62,18 @@ def recovery_decision(state: dict[str, Any]) -> dict[str, Any] | None:
             reason="USER_REQUESTED",
         )
 
-    if intent != "unknown":
-        return None
+    if trigger is None:
+        if intent != "unknown":
+            return None
+        trigger = "unknown"
+    elif trigger not in {"unknown", "unsupported"}:
+        raise ValueError(f"未知恢复触发类型: {trigger}")
 
     count = current_count + 1
     if count < MAX_UNRECOGNIZED_ATTEMPTS:
+        retry_stage = "first" if count == 1 else "second"
         return _decision(
-            reply_key="unknown_first" if count == 1 else "unknown_second",
+            reply_key=f"{trigger}_{retry_stage}",
             out=DialogueOutput.CHAT,
             plugin_state=plugin_state,
             count=count,
@@ -64,12 +81,16 @@ def recovery_decision(state: dict[str, Any]) -> dict[str, Any] | None:
             reason=None,
         )
     return _decision(
-        reply_key="unknown_handoff",
+        reply_key=f"{trigger}_handoff",
         out=DialogueOutput.HUMAN,
         plugin_state=plugin_state,
         count=count,
         status="HANDOFF_PENDING",
-        reason="CONSECUTIVE_UNRECOGNIZED",
+        reason=(
+            "CONSECUTIVE_UNRECOGNIZED"
+            if trigger == "unknown"
+            else "CONSECUTIVE_UNSUPPORTED"
+        ),
     )
 
 
