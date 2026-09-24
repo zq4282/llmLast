@@ -14,7 +14,6 @@ def router(state: ChatState) -> dict[str, Any]:
     """首次由模型选插件；锁定后只读共享状态，不再调用顶层 Router 模型。"""
 
     route_task = state.get("route_task")
-    print(state)
     if state.get("route_locked") and route_task and route_task != "UNKNOWN":
         existing_business = state.get("business")
         plugin = (

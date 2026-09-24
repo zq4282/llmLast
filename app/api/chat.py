@@ -1,13 +1,17 @@
 """唯一对外业务接口：POST /api/chat。"""
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from app.engine.graph import run_graph
+from app.integrations.llm_api import LLMAPIError
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.session.store import session_store
 
 
 router = APIRouter(tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -28,7 +32,11 @@ def chat(request: ChatRequest) -> ChatResponse:
                 "context": session.context,
             }
         )
+    except LLMAPIError as exc:
+        logger.exception("模型调用失败: %s", exc)
+        raise HTTPException(status_code=502, detail=f"模型调用失败: {exc}") from exc
     except Exception as exc:
+        logger.exception("对话引擎执行失败")
         raise HTTPException(status_code=500, detail="对话引擎执行失败") from exc
 
     reply_text = result["reply"]

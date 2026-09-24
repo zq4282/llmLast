@@ -107,17 +107,15 @@ class IntentLLM:
     def classify_route(self, message: str, history: list[dict[str, str]]) -> RouteDecision:
         """只做 Task 分类。是否复用已有结果由 router 节点通过共享状态决定。"""
 
-        if self.client:
-            decision = self._route_with_llm(message, history)
-            if decision:
-                return decision
-        return RouteDecision(task="UNKNOWN", confidence=0.0)
+        if self.client is None:
+            raise LLMAPIError("未配置 LLM_API_KEY，无法执行顶层路由")
+        return self._route_with_llm(message, history)
 
     def _route_with_llm(
         self,
         message: str,
         history: list[dict[str, str]],
-    ) -> RouteDecision | None:
+    ) -> RouteDecision:
         previous_assistant = next(
             (item.get("content", "") for item in reversed(history) if item.get("role") == "assistant"),
             "",
@@ -126,23 +124,25 @@ class IntentLLM:
             {"上一轮客服播报": previous_assistant, "当前用户表达": message},
             ensure_ascii=False,
         )
+        content = self.client.chat(
+            [
+                {"role": "system", "content": TASK_ROUTER_PROMPT},
+                {"role": "user", "content": user_input},
+            ]
+        )
+        if not isinstance(content, str):
+            raise LLMAPIError("Router 模型返回了非文本内容")
         try:
-            content = self.client.chat(  # type: ignore[union-attr]
-                [
-                    {"role": "system", "content": TASK_ROUTER_PROMPT},
-                    {"role": "user", "content": user_input},
-                ]
-            )
-            if not isinstance(content, str):
-                return None
             data = self._parse_json_object(content)
             task = str(data.get("task", "")).upper()
             confidence = float(data.get("confidence"))
-            if task not in TASKS or not 0.0 <= confidence <= 1.0:
-                return None
-            return RouteDecision(task=task, confidence=round(confidence, 2))
-        except (LLMAPIError, json.JSONDecodeError, TypeError, ValueError):
-            return None
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise LLMAPIError(f"Router 模型返回格式错误: {content[:300]!r}") from exc
+        if task not in TASKS:
+            raise LLMAPIError(f"Router 模型返回未知 Task: {task!r}")
+        if not 0.0 <= confidence <= 1.0:
+            raise LLMAPIError(f"Router 模型返回非法 confidence: {confidence!r}")
+        return RouteDecision(task=task, confidence=round(confidence, 2))
 
     @staticmethod
     def _parse_json_object(content: str) -> dict[str, Any]:
@@ -160,17 +160,9 @@ class IntentLLM:
         context: dict[str, Any],
         history: list[dict[str, str]],
     ) -> IntentDecision:
-        if self.client:
-            llm_result = self._understand_with_llm(
-                message,
-                plugin,
-                plugin_state,
-                context,
-                history,
-            )
-            if llm_result:
-                return llm_result
-        return IntentDecision(intent="unknown", confidence=0.0, slots={})
+        if self.client is None:
+            raise LLMAPIError("未配置 LLM_API_KEY，无法执行插件意图识别")
+        return self._understand_with_llm(message, plugin, plugin_state, context, history)
 
     def _understand_with_llm(
         self,
@@ -179,7 +171,7 @@ class IntentLLM:
         plugin_state: str,
         context: dict[str, Any],
         history: list[dict[str, str]],
-    ) -> IntentDecision | None:
+    ) -> IntentDecision:
         history_text = "\n".join(
             f"{'系统' if item.get('role') == 'assistant' else '用户'}：{item.get('content', '')}"
             for item in history[-10:]
@@ -193,21 +185,25 @@ class IntentLLM:
         }
         for placeholder, value in replacements.items():
             prompt = prompt.replace(placeholder, value)
+        content = self.client.chat([{"role": "user", "content": prompt}])
+        if not isinstance(content, str):
+            raise LLMAPIError(f"插件 {plugin.name} 模型返回了非文本内容")
         try:
-            content = self.client.chat([{"role": "user", "content": prompt}]) if self.client else ""
-            if not isinstance(content, str):
-                return None
             data = self._parse_json_object(content)
             intent = data.get("intent")
             slots = data.get("slots")
             confidence = float(data.get("confidence"))
-            if not isinstance(intent, str) or not intent or not isinstance(slots, dict):
-                return None
-            if not 0.0 <= confidence <= 1.0:
-                return None
-            explicit_slots = {str(key): value for key, value in slots.items() if value is not None}
-            return IntentDecision(intent, round(confidence, 2), explicit_slots)
-        except (LLMAPIError, json.JSONDecodeError, TypeError, ValueError):
-            return None
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise LLMAPIError(
+                f"插件 {plugin.name} 模型返回格式错误: {content[:300]!r}"
+            ) from exc
+        if not isinstance(intent, str) or not intent:
+            raise LLMAPIError(f"插件 {plugin.name} 模型未返回有效 intent")
+        if not isinstance(slots, dict):
+            raise LLMAPIError(f"插件 {plugin.name} 模型返回的 slots 不是 object")
+        if not 0.0 <= confidence <= 1.0:
+            raise LLMAPIError(f"插件 {plugin.name} 模型返回非法 confidence: {confidence!r}")
+        explicit_slots = {str(key): value for key, value in slots.items() if value is not None}
+        return IntentDecision(intent, round(confidence, 2), explicit_slots)
 
 intent_llm = IntentLLM()

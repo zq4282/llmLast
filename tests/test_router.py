@@ -1,8 +1,11 @@
 import json
 
+import pytest
+
 from app.engine import graph
 from app.engine.llm import IntentLLM, RouteDecision
 from app.engine.loader import plugin_loader
+from app.integrations.llm_api import LLMAPIError
 
 
 class FakeClient:
@@ -38,18 +41,16 @@ def test_missing_model_does_not_guess_route_from_keywords() -> None:
     classifier = IntentLLM()
     classifier.client = None
 
-    result = classifier.classify_route("不知道怎么扣的，赶紧退我钱", [])
-
-    assert result == RouteDecision(task="UNKNOWN", confidence=0.0)
+    with pytest.raises(LLMAPIError, match="未配置 LLM_API_KEY"):
+        classifier.classify_route("不知道怎么扣的，赶紧退我钱", [])
 
 
 def test_invalid_model_json_does_not_fall_back_to_keyword_rules() -> None:
     classifier = IntentLLM()
     classifier.client = FakeClient("这不是 JSON")
 
-    result = classifier.classify_route("退我钱", [])
-
-    assert result == RouteDecision(task="UNKNOWN", confidence=0.0)
+    with pytest.raises(LLMAPIError, match="Router 模型返回格式错误"):
+        classifier.classify_route("退我钱", [])
 
 
 def test_understand_renders_prompt_from_state_machine_plugin() -> None:
