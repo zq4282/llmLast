@@ -76,6 +76,39 @@ def test_human_flow_records_reason_and_handoffs(monkeypatch) -> None:
     assert "上个月被重复扣费" in second["reply"]
 
 
+def test_human_flow_does_not_ask_again_when_initial_request_has_reason(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"task":"HUMAN","confidence":0.99}',
+            '{"intent":"transfer_request","confidence":0.98,'
+            '"slots":{"reason":"被扣23元且不清楚扣费原因"}}',
+        ]
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+
+    result = run_graph(
+        {
+            "session_id": "human-initial-reason",
+            "message": "为啥扣我23元，我要投诉",
+            "history": [],
+            "business": None,
+            "plugin_state": None,
+            "context": {},
+            "unrecognized_count": 0,
+        }
+    )
+
+    assert result["action"] == "record_reason"
+    assert result["action_result"] == {
+        "ok": True,
+        "reason": "被扣23元且不清楚扣费原因",
+    }
+    assert result["plugin_state"] == "END"
+    assert result["out"] == "HUMAN"
+    assert "被扣23元且不清楚扣费原因" in result["reply"]
+    assert "方便先简单说一下" not in result["reply"]
+
+
 def test_human_flow_allows_direct_handoff(monkeypatch) -> None:
     model = SequenceClient(
         [
@@ -121,9 +154,86 @@ def test_human_flow_can_be_cancelled(monkeypatch) -> None:
         }
     )
 
-    assert result["plugin_state"] == "END"
+    assert result["plugin_state"] == "AFTER_CANCEL"
     assert result["out"] == "CHAT"
     assert "随时告诉我" in result["reply"]
+
+
+def test_insult_after_cancelling_asks_whether_to_handoff(monkeypatch) -> None:
+    model = SequenceClient(
+        ['{"intent":"insult","confidence":0.99,"slots":{"reason":null}}']
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+
+    result = run_graph(
+        {
+            "session_id": "human-insult-after-cancel",
+            "message": "傻逼",
+            "history": [],
+            "business": "human",
+            "plugin_state": "AFTER_CANCEL",
+            "context": {},
+            "unrecognized_count": 0,
+        }
+    )
+
+    assert result["action_result"] == {
+        "ok": True,
+        "sentiment": "insult",
+        "insult_count": 1,
+    }
+    assert result["plugin_state"] == "CONFIRM_TRANSFER"
+    assert result["out"] == "CHAT"
+    assert "需要为您转接人工客服吗" in result["reply"]
+
+
+def test_non_insult_after_cancelling_ends_service(monkeypatch) -> None:
+    model = SequenceClient(
+        ['{"intent":"other","confidence":0.93,"slots":{"reason":null}}']
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+
+    result = run_graph(
+        {
+            "session_id": "human-other-after-cancel",
+            "message": "我再看看其他的",
+            "history": [],
+            "business": "human",
+            "plugin_state": "AFTER_CANCEL",
+            "context": {},
+            "unrecognized_count": 0,
+        }
+    )
+
+    assert result["plugin_state"] == "END"
+    assert result["out"] == "END"
+    assert result["reply"] == "好的，本次服务已结束。"
+
+
+def test_confirmed_handoff_after_cancelled_insult(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"intent":"transfer_request","confidence":0.97,'
+            '"slots":{"reason":null}}'
+        ]
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+
+    result = run_graph(
+        {
+            "session_id": "human-confirm-after-insult",
+            "message": "要，转人工",
+            "history": [],
+            "business": "human",
+            "plugin_state": "CONFIRM_TRANSFER",
+            "context": {"sentiment": "insult", "insult_count": 1},
+            "unrecognized_count": 0,
+        }
+    )
+
+    assert result["plugin_state"] == "END"
+    assert result["out"] == "HUMAN"
+    assert "正在为您转接人工客服" in result["reply"]
 
 
 def test_human_flow_handoffs_after_second_insult(monkeypatch) -> None:

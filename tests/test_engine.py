@@ -56,13 +56,24 @@ def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:
 def test_human_plugin_asks_reason_before_handoff() -> None:
     plugin = plugin_loader.get("human")
 
-    assert plugin.states == ("IDLE", "ASK_REASON", "INSULT_WARNED", "END")
+    assert plugin.states == (
+        "IDLE",
+        "ASK_REASON",
+        "INSULT_WARNED",
+        "AFTER_CANCEL",
+        "CONFIRM_TRANSFER",
+        "END",
+    )
     assert plugin.terminal_states == {"END"}
     initial = plugin.transition_for("IDLE", "transfer_request")
     assert initial is not None
-    assert initial.action == "none"
-    assert initial.next_state == "ASK_REASON"
-    assert initial.out == "CHAT"
+    assert initial.action == "record_reason"
+    assert initial.next_state == "END"
+    assert initial.out == "HUMAN"
+    missing_reason = initial.error_transition_for("missing_reason")
+    assert missing_reason is not None
+    assert missing_reason.next_state == "ASK_REASON"
+    assert missing_reason.out == "CHAT"
 
     with_reason = plugin.transition_for("ASK_REASON", "provide_info")
     assert with_reason is not None

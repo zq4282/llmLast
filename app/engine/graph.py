@@ -234,7 +234,9 @@ def reply(state: ChatState) -> dict[str, Any]:
         "context": context,
         "out": out,
         "unrecognized_count": state.get("unrecognized_count", 0),
-        "handoff_reason": state.get("handoff_reason"),
+        "handoff_reason": (
+            state.get("handoff_reason") if out == DialogueOutput.HUMAN else None
+        ),
     }
 
 
