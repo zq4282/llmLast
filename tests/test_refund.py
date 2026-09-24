@@ -221,3 +221,49 @@ def test_refund_continues_when_user_supplies_order_number(monkeypatch) -> None:
     assert result["action_result"]["order_no"] == "A1001"
     assert result["plugin_state"] == "CONFIRM_REFUND"
     assert "是否需要为您申请退款" in result["reply"]
+
+
+def test_refund_end_state_returns_end_output(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"intent":"end","confidence":0.98,'
+            '"slots":{"backup_phone":null,"order_no":null}}',
+            '{"intent":"other","confidence":0.90,'
+            '"slots":{"backup_phone":null,"order_no":null}}',
+        ]
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+
+    ended = run_graph(
+        {
+            "session_id": "refund-end",
+            "message": "没有其他问题了",
+            "history": [],
+            "business": "refund",
+            "plugin_state": "ASK_OTHER",
+            "route_task": "REFUND",
+            "route_confidence": 0.97,
+            "route_locked": True,
+            "context": {"order_no": "A1001"},
+        }
+    )
+    assert ended["plugin_state"] == "END"
+    assert ended["out"] == "END"
+    assert "感谢您的来电" in ended["reply"]
+
+    repeated = run_graph(
+        {
+            "session_id": "refund-end",
+            "message": "喂",
+            "history": [],
+            "business": "refund",
+            "plugin_state": ended["plugin_state"],
+            "route_task": "REFUND",
+            "route_confidence": 0.97,
+            "route_locked": True,
+            "context": ended["context"],
+        }
+    )
+    assert repeated["plugin_state"] == "END"
+    assert repeated["out"] == "END"
+    assert repeated["action"] == "none"

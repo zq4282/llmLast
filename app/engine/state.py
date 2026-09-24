@@ -47,7 +47,7 @@ class ChatState(TypedDict, total=False):
     reply_key: str
     # 【必需】actions.next；reply 成功后写回 plugin_state，失败时可由 on_error 覆盖。
     next_plugin_state: str
-    # 【必需】actions.out，对外标识 CHAT/REFUND/HUMAN。
+    # 【必需】actions.out，对外标识 CHAT/REFUND/HUMAN/END。
     out: str
     # 【内部需要】区分 templates 和 fallbacks 话术来源。可通过拆分 reply_key 类型后移除。
     use_fallback: bool

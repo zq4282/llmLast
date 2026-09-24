@@ -73,7 +73,7 @@ def decide(state: ChatState) -> dict[str, Any]:
             "action": "none",
             "reply_key": "end",
             "next_plugin_state": plugin_state,
-            "out": "CHAT",
+            "out": "END",
             "use_fallback": True,
         }
 

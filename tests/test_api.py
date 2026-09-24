@@ -23,6 +23,8 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
             '"slots":{"backup_phone":null,"order_no":null}}',
             '{"intent":"affirm","confidence":0.95,'
             '"slots":{"backup_phone":null,"order_no":null}}',
+            '{"intent":"end","confidence":0.98,'
+            '"slots":{"backup_phone":null,"order_no":null}}',
         ]
     )
     monkeypatch.setattr(intent_llm, "client", model)
@@ -46,7 +48,11 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         assert body["action"] == "submit_refund"
         assert body["out"] == "REFUND"
         assert body["data"]["order_no"] == "A1001"
-        assert len(model.calls) == 3
+        end_response = client.post("/api/chat", json={"session_id": "api-test", "message": "没有了"})
+        assert end_response.status_code == 200
+        assert end_response.json()["out"] == "END"
+
+        assert len(model.calls) == 4
         assert sum(call[0]["role"] == "system" for call in model.calls) == 1
 
 

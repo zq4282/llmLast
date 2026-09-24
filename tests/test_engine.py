@@ -21,3 +21,8 @@ def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:
     lookup_error = initial_lookup.error_transition_for("order_not_found")
     assert lookup_error is not None
     assert lookup_error.next_state == "ASK_ORDER_INFO"
+
+    end_transition = plugin.transition_for("ASK_OTHER", "end")
+    assert end_transition is not None
+    assert end_transition.next_state == "END"
+    assert end_transition.out == "END"

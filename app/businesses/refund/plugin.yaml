@@ -59,7 +59,7 @@ prompt: |
   9. 用户说"转人工/找客服/投诉"，判 human。
   10. 不要编造手机号、订单号、金额、时间，用户没说的槽位一律 null。
   11. 不确定就输出 unknown，confidence 低于 0.6，不要猜。
-  12. 不要输出 CHAT/REFUND/HUMAN，这些由程序决定。
+  12. 不要输出 CHAT/REFUND/HUMAN/END，这些由程序决定。
   13. 只输出 JSON。
 
   示例：
@@ -134,7 +134,7 @@ actions:
     do: none
     reply: end
     next: END
-    out: CHAT
+    out: END
 
 templates:
   confirm: "我查到您有一笔{amount}元在{merchant}的扣款，是否需要为您申请退款？"
