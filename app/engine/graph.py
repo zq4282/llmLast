@@ -159,10 +159,15 @@ def get_graph():
     plugin_loader.load_all()
     builder = StateGraph(ChatState)
 
+    # 路由分发
     builder.add_node("router", router)
+    # 理解
     builder.add_node("understand", understand)
+    # 决定
     builder.add_node("decide", decide)
+    # 执行
     builder.add_node("execute", execute)
+    # 回复
     builder.add_node("reply", reply)
 
     builder.add_edge(START, "router")

@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 import yaml
 
+from app.engine.route_tasks import ROUTE_TASKS
+
 
 class PluginConfigError(RuntimeError):
     pass
@@ -44,7 +46,7 @@ class Plugin:
     templates: dict[str, str]
     fallbacks: dict[str, str]
     module_prefix: str
-    route_task: str | None = None
+    route_task: str
 
     @property
     def initial_state(self) -> str:
@@ -61,6 +63,7 @@ class PluginLoader:
     def __init__(self, businesses_dir: Path | None = None) -> None:
         self.businesses_dir = businesses_dir or Path(__file__).parents[1] / "businesses"
         self._plugins: dict[str, Plugin] = {}
+        self._route_plugins: dict[str, str] = {}
         self._handlers: dict[tuple[str, str], Callable] = {}
         self._lock = RLock()
 
@@ -74,17 +77,17 @@ class PluginLoader:
                 plugin = self._load_one(config_path)
                 if plugin.name in plugins:
                     raise PluginConfigError(f"业务插件重名: {plugin.name}")
-                if plugin.route_task:
-                    previous = route_tasks.get(plugin.route_task)
-                    if previous:
-                        raise PluginConfigError(
-                            f"Task {plugin.route_task} 同时映射了插件 {previous} 和 {plugin.name}"
-                        )
-                    route_tasks[plugin.route_task] = plugin.name
+                previous = route_tasks.get(plugin.route_task)
+                if previous:
+                    raise PluginConfigError(
+                        f"Task {plugin.route_task} 同时映射了插件 {previous} 和 {plugin.name}"
+                    )
+                route_tasks[plugin.route_task] = plugin.name
                 plugins[plugin.name] = plugin
             if not plugins:
                 raise PluginConfigError("至少需要一个业务插件")
             self._plugins = plugins
+            self._route_plugins = route_tasks
             self._handlers.clear()
             return dict(plugins)
 
@@ -94,7 +97,15 @@ class PluginLoader:
         except (OSError, yaml.YAMLError) as exc:
             raise PluginConfigError(f"无法加载 {path}: {exc}") from exc
 
-        required = {"name", "states", "prompt", "actions", "templates", "fallbacks"}
+        required = {
+            "name",
+            "route_task",
+            "states",
+            "prompt",
+            "actions",
+            "templates",
+            "fallbacks",
+        }
         missing = required - raw.keys()
         if missing:
             raise PluginConfigError(f"{path} 缺少字段: {', '.join(sorted(missing))}")
@@ -183,6 +194,16 @@ class PluginLoader:
                         f"{error_code} 引用了未知话术 {error_transition.reply}"
                     )
 
+        route_task = str(raw["route_task"]).strip().upper()
+        if not route_task:
+            raise PluginConfigError(f"{path}: route_task 不能为空")
+        if route_task not in ROUTE_TASKS:
+            allowed_tasks = ", ".join(sorted(ROUTE_TASKS))
+            raise PluginConfigError(
+                f"{path}: route_task {route_task} 不在 Router 提示词的 Task 范围内: "
+                f"{allowed_tasks}"
+            )
+
         return Plugin(
             name=str(raw["name"]),
             states=states,
@@ -192,7 +213,7 @@ class PluginLoader:
             templates=templates,
             fallbacks=fallbacks,
             module_prefix=f"app.businesses.{path.parent.name}",
-            route_task=(str(raw["route_task"]).upper() if raw.get("route_task") else None),
+            route_task=route_task,
         )
 
     @property
@@ -208,23 +229,11 @@ class PluginLoader:
     def get_by_route_task(self, task: str) -> Plugin:
         """只按模型返回的 Task 映射插件，不在程序中重新猜测意图。"""
 
-        normalized_task = task.upper()
-        for plugin in self.plugins.values():
-            if plugin.route_task == normalized_task:
-                return plugin
-
-        aliases = {
-            "REFUND": ("refund",),
-            "BUSINESS_QA": ("business_qa", "query"),
-            "TRANSFER_HUMAN": ("transfer_human", "human", "transfer"),
-            "UNKNOWN": ("chat",),
-        }
-        for name in aliases.get(normalized_task, (normalized_task.lower(),)):
-            if name in self.plugins:
-                return self.plugins[name]
-
-        if "chat" in self.plugins:
-            return self.plugins["chat"]
+        normalized_task = task.strip().upper()
+        plugins = self.plugins
+        plugin_name = self._route_plugins.get(normalized_task)
+        if plugin_name:
+            return plugins[plugin_name]
         raise PluginConfigError(f"没有可处理 Task {normalized_task} 的插件")
 
     def execute(self, business: str, action: str, state: dict[str, Any]) -> dict[str, Any]:
