@@ -77,3 +77,45 @@ def test_redis_store_isolates_tenants_with_same_session_id() -> None:
 
     assert store.get("same-id", tenant_id=1).context == {}
     assert store.get("same-id", tenant_id=2).context == {"tenant": 2}
+
+
+def test_redis_store_round_trips_flow_stack_and_pending_switch() -> None:
+    client = fakeredis.FakeRedis(decode_responses=True)
+    store = RedisSessionStore(client=client, key_prefix="test-llmlast")
+    flows = [
+        {
+            "flow_id": "flow-refund",
+            "business": "refund",
+            "plugin_state": "CONFIRM_REFUND",
+            "status": "ACTIVE",
+            "context": {"order_no": "ORD202405010001"},
+            "unrecognized_count": 0,
+            "completed_actions": [],
+        }
+    ]
+    pending = {
+        "source_flow_id": "flow-refund",
+        "target_business": "unsubscribe",
+        "target_task": "UNSUBSCRIBE",
+        "trigger_message": "我还要退订",
+    }
+
+    store.save(
+        "flow-session",
+        business="refund",
+        plugin_state="CONFIRM_REFUND",
+        call_info={},
+        context=flows[0]["context"],
+        user_message="我还要退订",
+        assistant_message="是否切换？",
+        flows=flows,
+        active_flow_id="flow-refund",
+        pending_switch=pending,
+    )
+
+    restored = store.get("flow-session")
+    assert restored.flows == flows
+    assert restored.active_flow_id == "flow-refund"
+    assert restored.pending_switch == pending
+    assert restored.business == "refund"
+    assert restored.plugin_state == "CONFIRM_REFUND"

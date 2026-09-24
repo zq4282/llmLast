@@ -139,9 +139,9 @@ def test_unknown_during_refund_confirmation_uses_contextual_replies(monkeypatch)
 def test_unsupported_intent_does_not_repeat_forever(monkeypatch) -> None:
     model = SequenceClient(
         [
-            '{"intent":"other","confidence":0.90,"slots":{}}',
-            '{"intent":"other","confidence":0.90,"slots":{}}',
-            '{"intent":"other","confidence":0.90,"slots":{}}',
+            '{"intent":"unsupported_new_intent","confidence":0.90,"slots":{}}',
+            '{"intent":"unsupported_new_intent","confidence":0.90,"slots":{}}',
+            '{"intent":"unsupported_new_intent","confidence":0.90,"slots":{}}',
         ]
     )
     monkeypatch.setattr(intent_llm, "client", model)
@@ -165,8 +165,14 @@ def test_unsupported_intent_does_not_repeat_forever(monkeypatch) -> None:
     assert third["handoff_reason"] == "CONSECUTIVE_UNSUPPORTED"
 
 
-def test_router_unknown_uses_recovery_without_loading_plugin(monkeypatch) -> None:
-    model = SequenceClient(['{"task":"UNKNOWN","confidence":0.15}'])
+def test_router_unknown_uses_stateless_other_plugin(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"task":"UNKNOWN","confidence":0.15}',
+            '{"decision":"ANSWER","intent":"chitchat",'
+            '"reply":"您好，请问需要我帮您处理什么？","target_task":null}',
+        ]
+    )
     monkeypatch.setattr(intent_llm, "client", model)
 
     result = run_graph(
@@ -181,10 +187,12 @@ def test_router_unknown_uses_recovery_without_loading_plugin(monkeypatch) -> Non
         }
     )
 
-    assert result["business"] == "system"
-    assert result["intent"] == "unknown"
-    assert result["unrecognized_count"] == 1
+    assert result["business"] == "other"
+    assert result["intent"] == "chitchat"
+    assert result["unrecognized_count"] == 0
     assert result["out"] == "CHAT"
+    assert result["active_flow_id"] is None
+    assert result["flows"] == []
 
 
 def test_router_human_request_enters_reason_collection(monkeypatch) -> None:

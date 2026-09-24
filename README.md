@@ -1,14 +1,44 @@
 # 插件化对话引擎
 
-这是一个 FastAPI + LangGraph 的最小可运行实现。系统对外只提供
-`POST /api/chat`，内部所有业务共用一张五节点流程图：
+这是一个 FastAPI + LangGraph 的插件化对话引擎。系统对外只提供
+`POST /api/chat`，固定业务共用一张五节点流程图：
 
 ```text
 router → understand → decide → run_action → reply
 ```
 
-退款、退订、退款并退订和转人工流程均为 YAML 插件。新增业务时只需在
+退款、退订、退款并退订和转人工流程均为 YAML workflow 插件。新增业务时只需在
 `app/businesses/` 下增加 `plugin.yaml` 与 `handlers.py`，无需修改流程图。
+
+`other` 是单独的无状态 overlay 插件。顶级路由未匹配固定业务，或者活动业务插件
+返回 `other` 时，引擎临时调用它。它可以直接生成身份、能力、公司主体或闲聊回答，
+也可以发出内部 `ROUTE` 信号，将同一条原始消息交给固定业务插件。other 自己不进入
+会话流程列表、不保存 `plugin_state`，真正回答时对外固定返回 `CHAT`。
+
+## 插话与插件切换
+
+每个 workflow 插件默认通过 `global_handlers.other` 接入 other。状态可配置：
+
+```yaml
+state_policies:
+  CONFIRM_REFUND:
+    switch_policy: confirm       # allow | confirm | deny
+    remind_after_other: true
+    reminder: "刚才的退款还在等待确认，请回复“退款”或“不退款”。"
+```
+
+- other 返回 `ANSWER`：引擎返回 `CHAT`，ACTIVE 业务状态保持不变；提醒由引擎追加，
+  other 看不到业务状态或上下文。
+- other 返回 `ROUTE`：每轮最多内部重路由一次。`allow` 直接切换，`confirm` 保存
+  `pending_switch` 等待下一轮确认，`deny` 保持当前流程。
+- 普通切换将旧流程标记为 `SUSPENDED`；退款或退订升级到退款并退订时标记为
+  `SUPERSEDED`，并复用兼容上下文和已完成动作，防止重复办理。
+- 活动业务中的 `human` 仍由当前插件处理；只有没有活动业务时，顶级 HUMAN 才进入
+  独立 human 插件。
+
+会话通过 `flows` 保存流程快照，状态包含 `ACTIVE`、`SUSPENDED`、`COMPLETED`、
+`CANCELLED` 和 `SUPERSEDED`。兼容字段 `business/plugin_state/context` 始终投影当前
+ACTIVE 流程，旧客户端无需修改。
 
 ## 运行
 
@@ -49,7 +79,7 @@ curl -X POST http://127.0.0.1:8000/api/chat \
 `callInfo` 在后端作为独立的跨轮共享状态保存，图节点和业务 Handler 可通过
 `state["call_info"]` 读取；它不会混入业务槽位 `context`。
 
-不配置 LLM Key 时会使用内置规则进行路由和意图识别，便于本地开发及测试。
+路由、业务理解和 other 问答都依赖模型。不配置 LLM Key 时接口会明确返回模型配置错误。
 如需接入 DeepSeek 或其他 OpenAI 兼容接口，在 `.env` 中填写 `LLM_API_KEY`、
 `LLM_BASE_URL` 与 `LLM_MODEL`。
 
@@ -79,8 +109,9 @@ Redis 不可用时应用启动失败或聊天接口返回 503，不会静默降�
 ## 连续未理解恢复
 
 接口 `out` 固定为 `CHAT`、`REFUND`、`UNSUBSCRIBE`、`REFUND_UNSUBSCRIBE`、`HUMAN`、`END` 六种，不接受其他值。
-`CHAT`、`REFUND`、`UNSUBSCRIBE` 和 `REFUND_UNSUBSCRIBE` 会继续保留当前会话上下文；`HUMAN` 和 `END` 是终态，本轮回复
-返回后立即删除当前租户、当前 `sessionId` 的业务状态、上下文、历史和恢复计数。
+`CHAT`、`REFUND`、`UNSUBSCRIBE` 和 `REFUND_UNSUBSCRIBE` 会继续保留当前活动流程；
+`HUMAN` 和 `END` 会将当前流程标记为 `COMPLETED`，但不会删除历史流程和对话历史。
+完成后不再锁定路由，同一 `sessionId` 的下一条消息可以重新进入顶级路由。
 其中主动要求人工和恢复步骤最终升级都返回 `HUMAN`。
 
 模型连续返回 `unknown`，或返回当前插件状态未配置的意图时，引擎会保存跨轮计数并
@@ -89,5 +120,5 @@ Redis 不可用时应用启动失败或聊天接口返回 503，不会静默降�
 一步必须为 `out: HUMAN`。因此配置两步就只需两条对应话术，配置三步就需要三条。
 插件可通过 `<状态名小写>_<reply>` 形式的 fallback key 覆盖某个状态的话术，例如
 `confirm_refund_unknown_first`；未配置时使用引擎级通用话术。只有匹配到有效业务动作
-后才会将连续恢复次数清零，业务接口异常不会增加该次数。终态后的下一次请求按新会话
-处理；内置前端会自动生成新的 `sessionId`，并且不再携带旧 `historyContext`。
+后才会将连续恢复次数清零，业务接口异常不会增加该次数。终态后的流程保留为历史快照，
+下一次请求在没有 ACTIVE 流程的情况下重新执行顶级路由。

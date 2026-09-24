@@ -250,8 +250,9 @@ def test_refund_end_state_returns_end_output(monkeypatch) -> None:
         [
             '{"intent":"end","confidence":0.98,'
             '"slots":{"backup_phone":null,"order_no":null}}',
-            '{"intent":"other","confidence":0.90,'
-            '"slots":{"backup_phone":null,"order_no":null}}',
+            '{"task":"UNKNOWN","confidence":0.40}',
+            '{"decision":"ANSWER","intent":"chitchat",'
+            '"reply":"您好，请问需要什么帮助？","target_task":null}',
         ]
     )
     monkeypatch.setattr(intent_llm, "client", model)
@@ -280,6 +281,7 @@ def test_refund_end_state_returns_end_output(monkeypatch) -> None:
             "context": ended["context"],
         }
     )
-    assert repeated["plugin_state"] == "END"
-    assert repeated["out"] == "END"
-    assert repeated["action"] == "none"
+    assert repeated["business"] == "other"
+    assert repeated["plugin_state"] is None
+    assert repeated["out"] == "CHAT"
+    assert repeated["reply"] == "您好，请问需要什么帮助？"

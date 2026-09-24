@@ -37,6 +37,9 @@ class Session:
     context: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
     unrecognized_count: int = 0
+    flows: list[dict[str, Any]] = field(default_factory=list)
+    active_flow_id: str | None = None
+    pending_switch: dict[str, Any] | None = None
 
 
 class SessionStore(Protocol):
@@ -48,7 +51,7 @@ class SessionStore(Protocol):
         self,
         session_id: str,
         *,
-        business: str,
+        business: str | None,
         plugin_state: str | None = None,
         call_info: dict[str, str],
         context: dict[str, Any],
@@ -56,6 +59,9 @@ class SessionStore(Protocol):
         assistant_message: str,
         tenant_id: int = 1002,
         unrecognized_count: int = 0,
+        flows: list[dict[str, Any]] | None = None,
+        active_flow_id: str | None = None,
+        pending_switch: dict[str, Any] | None = None,
     ) -> None: ...
 
     def ping(self) -> None: ...
@@ -87,7 +93,7 @@ class MemorySessionStore:
         self,
         session_id: str,
         *,
-        business: str,
+        business: str | None,
         plugin_state: str | None = None,
         call_info: dict[str, str],
         context: dict[str, Any],
@@ -95,6 +101,9 @@ class MemorySessionStore:
         assistant_message: str,
         tenant_id: int = 1002,
         unrecognized_count: int = 0,
+        flows: list[dict[str, Any]] | None = None,
+        active_flow_id: str | None = None,
+        pending_switch: dict[str, Any] | None = None,
     ) -> None:
         key = self._key(session_id, tenant_id)
         with self._guard:
@@ -109,6 +118,9 @@ class MemorySessionStore:
                 assistant_message=assistant_message,
                 max_history=self._max_history,
                 unrecognized_count=unrecognized_count,
+                flows=flows,
+                active_flow_id=active_flow_id,
+                pending_switch=pending_switch,
             )
 
     def ping(self) -> None:
@@ -154,6 +166,9 @@ class RedisSessionStore:
                 context=_json_object(raw.get("context")),
                 history=_json_history(raw.get("history")),
                 unrecognized_count=int(raw.get("unrecognized_count", "0")),
+                flows=_json_list(raw.get("flows")),
+                active_flow_id=raw.get("active_flow_id") or None,
+                pending_switch=_json_optional_object(raw.get("pending_switch")),
             )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise SessionStoreError("Redis 会话数据格式错误") from exc
@@ -168,7 +183,7 @@ class RedisSessionStore:
         self,
         session_id: str,
         *,
-        business: str,
+        business: str | None,
         plugin_state: str | None = None,
         call_info: dict[str, str],
         context: dict[str, Any],
@@ -176,6 +191,9 @@ class RedisSessionStore:
         assistant_message: str,
         tenant_id: int = 1002,
         unrecognized_count: int = 0,
+        flows: list[dict[str, Any]] | None = None,
+        active_flow_id: str | None = None,
+        pending_switch: dict[str, Any] | None = None,
     ) -> None:
         session = self.get(session_id, tenant_id=tenant_id)
         _update_session(
@@ -188,6 +206,9 @@ class RedisSessionStore:
             assistant_message=assistant_message,
             max_history=self._max_history,
             unrecognized_count=unrecognized_count,
+            flows=flows,
+            active_flow_id=active_flow_id,
+            pending_switch=pending_switch,
         )
         values = asdict(session)
         mapping = {
@@ -197,6 +218,9 @@ class RedisSessionStore:
             "context": json.dumps(values["context"], ensure_ascii=False),
             "history": json.dumps(values["history"], ensure_ascii=False),
             "unrecognized_count": str(values["unrecognized_count"]),
+            "flows": json.dumps(values["flows"], ensure_ascii=False),
+            "active_flow_id": values["active_flow_id"] or "",
+            "pending_switch": json.dumps(values["pending_switch"], ensure_ascii=False),
             "updated_at": str(int(time())),
         }
         key = self._key(session_id, tenant_id)
@@ -252,7 +276,7 @@ def build_session_store(settings: SessionSettings | None = None) -> MemorySessio
 def _update_session(
     session: Session,
     *,
-    business: str,
+    business: str | None,
     plugin_state: str | None,
     call_info: dict[str, str],
     context: dict[str, Any],
@@ -260,12 +284,33 @@ def _update_session(
     assistant_message: str,
     max_history: int,
     unrecognized_count: int,
+    flows: list[dict[str, Any]] | None,
+    active_flow_id: str | None,
+    pending_switch: dict[str, Any] | None,
 ) -> None:
-    session.business = business
-    session.plugin_state = plugin_state
+    if flows is None:
+        # 兼容仍按单流程调用 SessionStore 的代码。
+        session.business = business
+        session.plugin_state = plugin_state
+        session.context = deepcopy(context)
+        session.unrecognized_count = unrecognized_count
+    else:
+        session.flows = deepcopy(flows)
+        session.active_flow_id = active_flow_id
+        session.pending_switch = deepcopy(pending_switch)
+        active = next(
+            (
+                flow
+                for flow in session.flows
+                if flow.get("flow_id") == active_flow_id and flow.get("status") == "ACTIVE"
+            ),
+            None,
+        )
+        session.business = str(active["business"]) if active else None
+        session.plugin_state = str(active.get("plugin_state") or "") or None if active else None
+        session.context = deepcopy(active.get("context", {})) if active else {}
+        session.unrecognized_count = int(active.get("unrecognized_count", 0)) if active else 0
     session.call_info = deepcopy(call_info)
-    session.context = deepcopy(context)
-    session.unrecognized_count = unrecognized_count
     session.history.extend(
         [
             {"role": "user", "content": user_message},
@@ -292,6 +337,20 @@ def _json_history(value: str | None) -> list[dict[str, str]]:
             raise TypeError("history item must be object")
         history.append({str(key): str(item_value) for key, item_value in item.items()})
     return history
+
+
+def _json_list(value: str | None) -> list[dict[str, Any]]:
+    data = json.loads(value or "[]")
+    if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+        raise TypeError("expected JSON object list")
+    return data
+
+
+def _json_optional_object(value: str | None) -> dict[str, Any] | None:
+    data = json.loads(value or "null")
+    if data is not None and not isinstance(data, dict):
+        raise TypeError("expected optional JSON object")
+    return data
 
 
 session_store = build_session_store()

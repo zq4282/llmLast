@@ -72,9 +72,10 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         assert end_response.json()["out"] == "END"
         ended_session = session_store.get("api-test")
         assert ended_session.business is None
-        assert ended_session.call_info == {}
+        assert ended_session.call_info["caller"] == "13800138000"
         assert ended_session.context == {}
-        assert ended_session.history == []
+        assert ended_session.history[-1]["content"] == end_response.json()["reply"]
+        assert ended_session.flows[-1]["status"] == "COMPLETED"
 
         assert len(model.calls) == 4
         assert sum(call[0]["role"] == "system" for call in model.calls) == 1
@@ -86,7 +87,7 @@ def test_blank_message_is_rejected() -> None:
     assert response.status_code == 422
 
 
-def test_api_clears_session_after_handoff(monkeypatch) -> None:
+def test_api_keeps_completed_session_after_handoff(monkeypatch) -> None:
     model = SequenceClient(
         [
             '{"task":"REFUND","confidence":0.97}',
@@ -135,7 +136,8 @@ def test_api_clears_session_after_handoff(monkeypatch) -> None:
         assert stored.business is None
         assert stored.plugin_state is None
         assert stored.context == {}
-        assert stored.history == []
+        assert len(stored.history) == 8
+        assert stored.flows[-1]["status"] == "COMPLETED"
         assert stored.unrecognized_count == 0
         assert len(model.calls) == 5
 

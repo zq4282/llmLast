@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from app.engine.graph import reply
 from app.engine.loader import PluginConfigError, PluginLoader, plugin_loader
@@ -10,10 +11,15 @@ from app.engine.outputs import ALLOWED_OUTPUTS
 def test_all_plugins_are_loaded() -> None:
     assert set(plugin_loader.load_all(force=True)) == {
         "human",
+        "other",
         "refund",
         "unsubscribe",
         "refund_unsubscribe",
     }
+    other = plugin_loader.get("other")
+    assert other.is_overlay is True
+    assert other.states == ()
+    assert other.route_task == "UNKNOWN"
 
 
 def test_external_outputs_include_business_action_values() -> None:
@@ -135,24 +141,17 @@ def test_refund_unsubscribe_plugin_combines_both_actions() -> None:
 
 def test_recovery_step_count_is_derived_from_config(tmp_path: Path) -> None:
     source = Path("app/businesses/refund/plugin.yaml").read_text(encoding="utf-8")
-    three_steps = """  unknown:
-    - reply: unknown_first
-      out: CHAT
-    - reply: unknown_second
-      out: CHAT
-    - reply: unknown_handoff
-      out: HUMAN
-"""
-    two_steps = """  unknown:
-    - reply: unknown_first
-      out: CHAT
-    - reply: unknown_handoff
-      out: HUMAN
-"""
-    assert three_steps in source
+    config = yaml.safe_load(source)
+    config["recovery"]["unknown"] = [
+        config["recovery"]["unknown"][0],
+        config["recovery"]["unknown"][-1],
+    ]
     plugin_path = tmp_path / "refund" / "plugin.yaml"
     plugin_path.parent.mkdir()
-    plugin_path.write_text(source.replace(three_steps, two_steps, 1), encoding="utf-8")
+    plugin_path.write_text(
+        yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
     plugin = PluginLoader(tmp_path).load_all()["refund"]
 

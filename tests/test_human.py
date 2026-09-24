@@ -189,7 +189,11 @@ def test_insult_after_cancelling_asks_whether_to_handoff(monkeypatch) -> None:
 
 def test_non_insult_after_cancelling_ends_service(monkeypatch) -> None:
     model = SequenceClient(
-        ['{"intent":"other","confidence":0.93,"slots":{"reason":null}}']
+        [
+            '{"intent":"other","confidence":0.93,"slots":{"reason":null}}',
+            '{"decision":"ANSWER","intent":"chitchat",'
+            '"reply":"好的，您可以先看看。","target_task":null}',
+        ]
     )
     monkeypatch.setattr(intent_llm, "client", model)
 
@@ -205,9 +209,10 @@ def test_non_insult_after_cancelling_ends_service(monkeypatch) -> None:
         }
     )
 
-    assert result["plugin_state"] == "END"
-    assert result["out"] == "END"
-    assert result["reply"] == "好的，本次服务已结束。"
+    assert result["plugin_state"] == "AFTER_CANCEL"
+    assert result["out"] == "CHAT"
+    assert result["reply"] == "好的，您可以先看看。"
+    assert result["handled_by"] == "other"
 
 
 def test_confirmed_handoff_after_cancelled_insult(monkeypatch) -> None:

@@ -1,23 +1,62 @@
+# 插件唯一名称；同时也是代码中 state["business"] 的值，以及 handlers.py 的模块目录名。
 name: refund
+# 顶级路由 Task；Task Router 返回 REFUND 时选择本插件。
 route_task: REFUND
 
-states:
-  - IDLE
-  - CONFIRM_REFUND
-  - ASK_ORDER_INFO
-  - ASK_OTHER
-  - END
+# 插件级通用意图处理器；对插件的所有非终态状态生效，状态无需重复配置。
+global_handlers:
+  # 当前插件识别出 other 时，临时调用无状态 other 插件处理本轮消息。
+  other:
+    # true 表示启用；other 只临时回答或二级路由，不覆盖退款流程状态。
+    enabled: true
 
+# 本插件允许出现的全部状态；第一个状态 IDLE 同时是 initial_state。
+states:
+  - IDLE             # 初始状态，尚未开始查询或确认退款。
+  - CONFIRM_REFUND   # 已查到订单，等待用户确认是否退款。
+  - ASK_ORDER_INFO   # 缺少订单定位信息，等待手机号或订单号。
+  - ASK_OTHER        # 退款已提交，询问用户是否还有其他问题。
+  - END              # 退款会话已经结束。
+
+# 终态集合；进入这些状态后流程被标记为 COMPLETED，不再锁定顶级路由。
 terminal_states: [END]
 
+# 各状态的跨插件切换策略，只影响 other 返回 ROUTE 的情况，不影响普通闲聊回答。
+state_policies:
+  # 初始状态尚未执行关键操作，可以直接切换到其他业务。
+  IDLE:
+    # allow=直接切换；confirm=询问用户；deny=禁止切换。
+    switch_policy: allow
+  # 已进入退款确认环节，切换前必须征得用户同意。
+  CONFIRM_REFUND:
+    switch_policy: confirm
+    # other 回答闲聊后，是否由引擎追加当前退款流程提醒。
+    remind_after_other: true
+    # 追加提醒模板；由引擎生成，other 插件本身看不到退款上下文。
+    reminder: "刚才的退款还在等待确认，请回复“退款”或“不退款”。"
+  # 收集订单信息时允许切换；原退款流程会保存为 SUSPENDED。
+  ASK_ORDER_INFO:
+    switch_policy: allow
+  # 当前退款动作已经完成，可以直接进入其他业务。
+  ASK_OTHER:
+    switch_policy: allow
+  # END 本身不会保持 ACTIVE；该配置作为脏数据或兼容场景的安全默认值。
+  END:
+    switch_policy: allow
+
+# 当前插件未理解用户，或者模型返回当前状态不支持的意图时，采用分级恢复。
 recovery:
+  # unknown：模型无法理解语义；每触发一次按顺序推进一步。
   unknown:
+    # reply 引用 fallbacks 中的话术 key；out 是本轮对外输出类型。
     - reply: unknown_first
       out: CHAT
     - reply: unknown_second
       out: CHAT
+    # 最后一步必须是 HUMAN，表示连续无法理解后升级人工。
     - reply: unknown_handoff
       out: HUMAN
+  # unsupported：语义可理解，但当前 state + intent 没有配置 actions 转移。
   unsupported:
     - reply: unsupported_first
       out: CHAT
@@ -26,6 +65,12 @@ recovery:
     - reply: unsupported_handoff
       out: HUMAN
 
+# 插件内意图识别提示词；只负责返回 intent/confidence/slots，不直接回复用户。
+# 占位符由引擎调用模型前替换：
+# - {state}：当前 plugin_state。
+# - {context}：跨轮保存的订单及业务上下文。
+# - {history}：最近对话历史。
+# - {user_input}：本轮用户原始输入。
 prompt: |
   你是退款客服系统的意图识别模块。你只负责理解用户说的话，不负责回复用户，不决定是否退款，不调用任何工具，不输出对外动作。
 
@@ -112,22 +157,36 @@ prompt: |
   用户：asdfasdf
   输出：{"intent":"unknown","confidence":0.10,"slots":{"backup_phone":null,"order_no":null}}
 
+# 状态动作表：通过“当前 state + 模型 intent”唯一确定动作、回复、下一状态和输出。
+# 每条动作中的字段含义：
+# - state：动作生效的当前状态，必须已在 states 中声明。
+# - intent：prompt 返回的插件内意图。
+# - do：调用 handlers.py 中的同名函数；none 表示不执行业务函数。
+# - reply：成功时使用的 templates/fallbacks 话术 key。
+# - next：成功后进入的下一状态，必须已在 states 中声明。
+# - out：对外结果类型，例如 CHAT、REFUND、HUMAN、END。
+# - on_error：handler 返回 ok=false 时，按 error code 覆盖 reply/next/out。
 actions:
+  # 初始退款请求：先查询订单，成功后进入退款确认。
   - state: IDLE
     intent: refund_request
     do: query_order
     reply: confirm
     next: CONFIRM_REFUND
     out: CHAT
+    # 查询订单失败时不采用成功转移，而是进入下列错误分支。
     on_error:
+      # 没有订单号、备用手机号或可用主叫号码。
       missing_order_query:
         reply: ask_order_info
         next: ASK_ORDER_INFO
         out: CHAT
+      # 已提供查询条件，但没有找到符合退款条件的订单。
       order_not_found:
         reply: ask_order_info
         next: ASK_ORDER_INFO
         out: CHAT
+  # 用户补充订单号或手机号后，再次查询订单。
   - state: ASK_ORDER_INFO
     intent: provide_info
     do: query_order
@@ -143,24 +202,28 @@ actions:
         reply: retry_order_info
         next: ASK_ORDER_INFO
         out: CHAT
+  # 用户确认退款：提交退款，成功后进入“是否还有其他问题”。
   - state: CONFIRM_REFUND
     intent: affirm
     do: submit_refund
     reply: done
     next: ASK_OTHER
     out: REFUND
+  # 用户拒绝退款：不调用业务动作，回到初始状态。
   - state: CONFIRM_REFUND
     intent: negate
     do: none
     reply: cancel
     next: IDLE
     out: CHAT
+  # 退款提交后再次要求退款：不重复提交，只告知已经处理。
   - state: ASK_OTHER
     intent: refund_request
     do: none
     reply: already_done
     next: ASK_OTHER
     out: CHAT
+  # 用户明确没有其他问题：结束当前退款流程。
   - state: ASK_OTHER
     intent: end
     do: none
@@ -168,37 +231,57 @@ actions:
     next: END
     out: END
 
+# 正常动作话术表；actions.reply 通过 key 引用这里的文本。
+# 花括号变量由 context、slots 和 action_result 合并后渲染。
 templates:
+  # query_order 成功后确认退款，amount/merchant 来自订单查询结果。
   confirm: "我查到您有一笔{amount}元在{merchant}的扣款，是否需要为您申请退款？"
+  # 首次缺少订单定位信息。
   ask_order_info: "暂未查到可退款订单，请提供下单手机号或订单号，我再为您查询。"
+  # 用户补充信息后仍未找到订单。
   retry_order_info: "根据您提供的信息仍未查到订单，请核对后重新提供手机号或订单号。"
+  # submit_refund 成功，eta 来自动作结果。
   done: "已为您提交退款，预计{eta}到账，具体到账时间以账单为准。请问还有其他疑问吗？"
+  # 用户在确认环节拒绝退款。
   cancel: "已取消退款，还有其他问题吗？"
+  # 防止 ASK_OTHER 状态重复提交退款。
   already_done: "这笔退款已经提交过了，预计{eta}到账，您可以在账单里查看。"
+  # 用户明确结束服务。
   end: "感谢您的来电，祝您生活愉快。"
 
+# 兜底话术表；用于 human、unknown、unsupported、终态或业务错误场景。
+# 状态专属 key 遵循“状态名小写_恢复话术 key”，优先于通用 key。
 fallbacks:
+  # 当前退款插件内识别到 human 时使用，不会切换到独立 human 插件。
   human: "正在为您转接人工，请稍候。"
+  # 未指定分级恢复 key 时的通用无法理解话术。
   unknown: "抱歉，我没太听明白，您能再说一遍吗？"
+  # 终态通用话术。
   end: "本次服务已结束，感谢您的来电。"
+  # unknown 的第 1、2 次恢复以及最终人工升级话术。
   unknown_first: "抱歉，我没太听明白。请根据上一条提示重新回答。"
   unknown_second: "抱歉，我还是没能理解。请再回答一次，或直接说“转人工”。"
   unknown_handoff: "还是没能理解您的意思，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
+  # unsupported 的第 1、2 次恢复以及最终人工升级话术。
   unsupported_first: "当前流程无法处理这句话，请根据上一条提示重新回答。"
   unsupported_second: "当前流程仍无法处理您的回复。请再回答一次，或直接说“转人工”。"
   unsupported_handoff: "当前流程无法继续处理，正在为您转接人工客服，本次沟通记录已同步，请稍候。"
+  # IDLE 状态覆盖通用 unknown/unsupported，使提示更贴合退款入口。
   idle_unknown_first: "抱歉，我没有理解您的回复。请说明您需要查询扣款、申请退款，还是转人工客服。"
   idle_unknown_second: "请直接说明“申请退款”或“转人工”。如果仍无法识别，我将为您转接人工客服。"
   idle_unsupported_first: "当前退款流程无法处理这项内容。请说明是否继续申请退款，或回复“转人工”。"
   idle_unsupported_second: "请直接回复“申请退款”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  # CONFIRM_REFUND 状态覆盖，提醒用户只能确认、拒绝或转人工。
   confirm_refund_unknown_first: "我没有理解您的回复。请问是否申请退回这笔{amount}元扣款？请回复“退款”或“不退款”。"
   confirm_refund_unknown_second: "请直接回复“退款”“不退款”或“转人工”，我再继续为您处理。"
   confirm_refund_unsupported_first: "当前正在确认这笔{amount}元扣款。请回复“退款”“不退款”，或说“转人工”。"
   confirm_refund_unsupported_second: "请直接回复“退款”“不退款”或“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  # ASK_ORDER_INFO 状态覆盖，提示用户补充可查询的订单信息。
   ask_order_info_unknown_first: "我没有识别到有效的手机号或订单号，请重新提供下单手机号或订单号。"
   ask_order_info_unknown_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。"
   ask_order_info_unsupported_first: "当前需要下单手机号或订单号才能继续查询，请重新提供，或回复“转人工”。"
   ask_order_info_unsupported_second: "请直接提供11位下单手机号、订单号，或回复“转人工”。如果仍无法继续，我将为您转接人工客服。"
+  # ASK_OTHER 状态覆盖，提示用户结束或转人工；明确的新业务由 other 负责路由。
   ask_other_unknown_first: "我没有理解您的回复。若没有其他问题请回复“没有了”，也可以直接说“转人工”。"
   ask_other_unknown_second: "请回复“没有了”结束服务，或回复“转人工”。"
   ask_other_unsupported_first: "退款流程已经处理完成。若没有其他问题请回复“没有了”，其他业务可回复“转人工”。"

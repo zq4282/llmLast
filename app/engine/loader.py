@@ -1,6 +1,7 @@
 """发现、校验并加载状态机业务插件。"""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from importlib import import_module
 from pathlib import Path
 from threading import RLock
@@ -16,6 +17,24 @@ from app.engine.route_tasks import ROUTE_TASKS
 
 class PluginConfigError(RuntimeError):
     pass
+
+
+class PluginKind(StrEnum):
+    WORKFLOW = "workflow"
+    OVERLAY = "overlay"
+
+
+class SwitchPolicy(StrEnum):
+    ALLOW = "allow"
+    CONFIRM = "confirm"
+    DENY = "deny"
+
+
+@dataclass(frozen=True)
+class StatePolicy:
+    switch_policy: SwitchPolicy = SwitchPolicy.ALLOW
+    remind_after_other: bool = False
+    reminder: str = ""
 
 
 @dataclass(frozen=True)
@@ -42,6 +61,7 @@ class TransitionConfig:
 @dataclass(frozen=True)
 class Plugin:
     name: str
+    kind: PluginKind
     states: tuple[str, ...]
     terminal_states: frozenset[str]
     prompt: str
@@ -51,10 +71,18 @@ class Plugin:
     recovery: dict[str, tuple[RecoveryStep, ...]]
     module_prefix: str
     route_task: str
+    other_enabled: bool
+    state_policies: dict[str, StatePolicy]
 
     @property
     def initial_state(self) -> str:
+        if not self.states:
+            raise PluginConfigError(f"无状态插件 {self.name} 没有 initial_state")
         return self.states[0]
+
+    @property
+    def is_overlay(self) -> bool:
+        return self.kind == PluginKind.OVERLAY
 
     def transition_for(self, state: str, intent: str) -> TransitionConfig | None:
         return next(
@@ -64,6 +92,9 @@ class Plugin:
 
     def recovery_steps_for(self, trigger: str) -> tuple[RecoveryStep, ...]:
         return self.recovery[trigger]
+
+    def state_policy_for(self, state: str) -> StatePolicy:
+        return self.state_policies.get(state, StatePolicy())
 
 
 class PluginLoader:
@@ -103,6 +134,17 @@ class PluginLoader:
             raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError) as exc:
             raise PluginConfigError(f"无法加载 {path}: {exc}") from exc
+
+        kind_text = str(raw.get("kind", PluginKind.WORKFLOW.value)).strip().lower()
+        try:
+            kind = PluginKind(kind_text)
+        except ValueError as exc:
+            raise PluginConfigError(
+                f"{path}: kind 必须是 {[item.value for item in PluginKind]} 之一"
+            ) from exc
+
+        if kind == PluginKind.OVERLAY:
+            return self._load_overlay(path, raw)
 
         required = {
             "name",
@@ -289,8 +331,11 @@ class PluginLoader:
                 f"{allowed_tasks}"
             )
 
+        other_enabled, state_policies = self._load_workflow_policies(path, raw, states)
+
         return Plugin(
             name=str(raw["name"]),
+            kind=kind,
             states=states,
             terminal_states=terminal_states,
             prompt=str(raw["prompt"]),
@@ -300,7 +345,83 @@ class PluginLoader:
             recovery=recovery,
             module_prefix=f"app.businesses.{path.parent.name}",
             route_task=route_task,
+            other_enabled=other_enabled,
+            state_policies=state_policies,
         )
+
+    def _load_overlay(self, path: Path, raw: dict[str, Any]) -> Plugin:
+        required = {"name", "route_task", "prompt"}
+        missing = required - raw.keys()
+        if missing:
+            raise PluginConfigError(f"{path} 缺少字段: {', '.join(sorted(missing))}")
+        route_task = str(raw["route_task"]).strip().upper()
+        if route_task not in ROUTE_TASKS:
+            allowed_tasks = ", ".join(sorted(ROUTE_TASKS))
+            raise PluginConfigError(
+                f"{path}: route_task {route_task} 不在 Router 提示词的 Task 范围内: "
+                f"{allowed_tasks}"
+            )
+        if str(raw.get("external_output", "CHAT")).strip().upper() != "CHAT":
+            raise PluginConfigError(f"{path}: overlay 插件 external_output 只能是 CHAT")
+        return Plugin(
+            name=str(raw["name"]),
+            kind=PluginKind.OVERLAY,
+            states=(),
+            terminal_states=frozenset(),
+            prompt=str(raw["prompt"]),
+            transitions=(),
+            templates={},
+            fallbacks={},
+            recovery={},
+            module_prefix=f"app.businesses.{path.parent.name}",
+            route_task=route_task,
+            other_enabled=False,
+            state_policies={},
+        )
+
+    @staticmethod
+    def _load_workflow_policies(
+        path: Path,
+        raw: dict[str, Any],
+        states: tuple[str, ...],
+    ) -> tuple[bool, dict[str, StatePolicy]]:
+        raw_handlers = raw.get("global_handlers", {})
+        if not isinstance(raw_handlers, dict):
+            raise PluginConfigError(f"{path}: global_handlers 必须是对象")
+        raw_other = raw_handlers.get("other", {})
+        if not isinstance(raw_other, dict):
+            raise PluginConfigError(f"{path}: global_handlers.other 必须是对象")
+        other_enabled = bool(raw_other.get("enabled", True))
+
+        raw_policies = raw.get("state_policies", {})
+        if not isinstance(raw_policies, dict):
+            raise PluginConfigError(f"{path}: state_policies 必须是对象")
+        unknown_states = set(raw_policies) - set(states)
+        if unknown_states:
+            raise PluginConfigError(
+                f"{path}: state_policies 引用了未声明状态 {sorted(unknown_states)}"
+            )
+        policies: dict[str, StatePolicy] = {}
+        for state in states:
+            config = raw_policies.get(state, {})
+            if not isinstance(config, dict):
+                raise PluginConfigError(f"{path}: state_policies.{state} 必须是对象")
+            policy_text = str(config.get("switch_policy", "allow")).strip().lower()
+            try:
+                switch_policy = SwitchPolicy(policy_text)
+            except ValueError as exc:
+                raise PluginConfigError(
+                    f"{path}: state_policies.{state}.switch_policy 必须是 "
+                    "allow、confirm 或 deny"
+                ) from exc
+            remind = bool(config.get("remind_after_other", False))
+            reminder = str(config.get("reminder", "")).strip()
+            if remind and not reminder:
+                raise PluginConfigError(
+                    f"{path}: state_policies.{state} 开启提醒时必须配置 reminder"
+                )
+            policies[state] = StatePolicy(switch_policy, remind, reminder)
+        return other_enabled, policies
 
     @property
     def plugins(self) -> dict[str, Plugin]:

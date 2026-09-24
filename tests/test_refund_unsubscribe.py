@@ -25,7 +25,32 @@ def test_submit_refund_unsubscribe_builds_combined_parameters() -> None:
         "reason": "用户确认退款并退订",
         "eta": "1到3个工作日",
         "effective_time": "立即生效",
+        "performed_actions": ["refund", "unsubscribe"],
+        "skipped_actions": [],
+        "refund_result": "退款已提交，预计1到3个工作日到账",
+        "unsubscribe_result": "退订立即生效，后续不再自动续费",
     }
+
+
+def test_combined_action_skips_refund_that_already_succeeded() -> None:
+    result = submit_refund_unsubscribe(
+        {
+            "context": {"order_no": "ORD202405010001"},
+            "slots": {},
+            "completed_actions": [
+                {
+                    "action": "submit_refund",
+                    "out": "REFUND",
+                    "order_no": "ORD202405010001",
+                    "status": "SUCCESS",
+                }
+            ],
+        }
+    )
+
+    assert result["performed_actions"] == ["unsubscribe"]
+    assert result["skipped_actions"] == ["refund"]
+    assert "不重复退款" in result["refund_result"]
 
 
 def test_refund_unsubscribe_state_machine_runs_across_turns(monkeypatch) -> None:
@@ -83,12 +108,16 @@ def test_refund_unsubscribe_state_machine_runs_across_turns(monkeypatch) -> None
         "reason": "用户申请",
         "eta": "1到3个工作日",
         "effective_time": "立即生效",
+        "performed_actions": ["refund", "unsubscribe"],
+        "skipped_actions": [],
+        "refund_result": "退款已提交，预计1到3个工作日到账",
+        "unsubscribe_result": "退订立即生效，后续不再自动续费",
     }
     assert second["plugin_state"] == "ASK_OTHER"
     assert second["out"] == "REFUND_UNSUBSCRIBE"
-    assert "已为您提交退款并退订" in second["reply"]
+    assert "退款已提交" in second["reply"]
     assert "后续不再自动续费" in second["reply"]
-    assert "退款预计1到3个工作日到账" in second["reply"]
+    assert "预计1到3个工作日到账" in second["reply"]
 
 
 def test_refund_unsubscribe_asks_for_order_info(monkeypatch) -> None:

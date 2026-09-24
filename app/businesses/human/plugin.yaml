@@ -1,6 +1,10 @@
 name: human
 route_task: HUMAN
 
+global_handlers:
+  other:
+    enabled: true
+
 states:
   - IDLE
   - ASK_REASON
@@ -10,6 +14,26 @@ states:
   - END
 
 terminal_states: [END]
+
+state_policies:
+  IDLE:
+    switch_policy: allow
+  ASK_REASON:
+    switch_policy: confirm
+    remind_after_other: true
+    reminder: "如果仍需转人工，请继续说明遇到的问题，或直接说“转人工”。"
+  INSULT_WARNED:
+    switch_policy: confirm
+    remind_after_other: true
+    reminder: "如果仍需转人工，请继续说明遇到的问题。"
+  AFTER_CANCEL:
+    switch_policy: allow
+  CONFIRM_TRANSFER:
+    switch_policy: confirm
+    remind_after_other: true
+    reminder: "刚才正在确认是否转人工，请回复“需要”或“不需要”。"
+  END:
+    switch_policy: allow
 
 recovery:
   unknown:

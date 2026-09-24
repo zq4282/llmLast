@@ -77,6 +77,19 @@ class IntentDecision:
     slots: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class OtherDecision:
+    decision: str
+    intent: str | None
+    reply: str | None
+    target_task: str | None
+
+
+@dataclass(frozen=True)
+class SwitchConfirmationDecision:
+    decision: str
+
+
 class LLMSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -205,6 +218,80 @@ class IntentLLM:
             raise LLMAPIError(f"插件 {plugin.name} 模型返回非法 confidence: {confidence!r}")
         explicit_slots = {str(key): value for key, value in slots.items() if value is not None}
         return IntentDecision(intent, round(confidence, 2), explicit_slots)
+
+    def handle_other(
+        self,
+        message: str,
+        plugin: Plugin,
+        available_tasks: dict[str, str],
+        *,
+        system_prompt: str = "你是会员业务客服",
+        max_reply_len: int = 60,
+    ) -> OtherDecision:
+        """调用无状态 other 插件；不传历史、业务状态或业务上下文。"""
+
+        if self.client is None:
+            raise LLMAPIError("未配置 LLM_API_KEY，无法执行 other 插件")
+        task_names = " | ".join(available_tasks) or "（无）"
+        task_definitions = "\n".join(
+            f"- {task}：{description}" for task, description in available_tasks.items()
+        ) or "（当前没有可转入的固定业务）"
+        prompt = plugin.prompt
+        replacements = {
+            "{system_prompt}": system_prompt,
+            "{available_tasks}": task_names,
+            "{task_definitions}": task_definitions,
+            "{user_input}": message,
+            "{max_reply_len}": str(max_reply_len),
+        }
+        for placeholder, value in replacements.items():
+            prompt = prompt.replace(placeholder, value)
+        content = self.client.chat([{"role": "user", "content": prompt}])
+        if not isinstance(content, str):
+            raise LLMAPIError("other 插件模型返回了非文本内容")
+        try:
+            data = self._parse_json_object(content)
+            decision = str(data.get("decision", "")).strip().upper()
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise LLMAPIError(f"other 插件模型返回格式错误: {content[:300]!r}") from exc
+
+        if decision == "ANSWER":
+            intent = data.get("intent")
+            reply = data.get("reply")
+            if intent not in {"ask_identity", "ask_capability", "ask_company", "chitchat"}:
+                raise LLMAPIError(f"other 插件返回未知 intent: {intent!r}")
+            if not isinstance(reply, str) or not reply.strip():
+                raise LLMAPIError("other 插件 ANSWER 未返回有效 reply")
+            return OtherDecision("ANSWER", intent, reply.strip(), None)
+
+        if decision == "ROUTE":
+            target_task = str(data.get("target_task", "")).strip().upper()
+            if target_task not in available_tasks:
+                raise LLMAPIError(f"other 插件返回不可用 target_task: {target_task!r}")
+            return OtherDecision("ROUTE", None, None, target_task)
+
+        raise LLMAPIError(f"other 插件返回未知 decision: {decision!r}")
+
+    def confirm_switch(self, message: str) -> SwitchConfirmationDecision:
+        """只判断用户是否确认切换业务，不借用任一业务插件的意图。"""
+
+        if self.client is None:
+            raise LLMAPIError("未配置 LLM_API_KEY，无法确认插件切换")
+        prompt = f"""你是业务流程切换确认器。用户上一轮被询问是否暂停当前业务并切换到另一个业务。
+只判断用户当前回答：确认切换、取消切换，还是没有明确回答。
+用户当前说：{message}
+只输出 JSON：{{"decision":"CONFIRM|CANCEL|UNKNOWN"}}"""
+        content = self.client.chat([{"role": "user", "content": prompt}])
+        if not isinstance(content, str):
+            raise LLMAPIError("切换确认模型返回了非文本内容")
+        try:
+            data = self._parse_json_object(content)
+            decision = str(data.get("decision", "")).strip().upper()
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise LLMAPIError(f"切换确认模型返回格式错误: {content[:300]!r}") from exc
+        if decision not in {"CONFIRM", "CANCEL", "UNKNOWN"}:
+            raise LLMAPIError(f"切换确认模型返回未知 decision: {decision!r}")
+        return SwitchConfirmationDecision(decision)
 
 
 intent_llm = IntentLLM()

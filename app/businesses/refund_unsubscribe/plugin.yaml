@@ -1,6 +1,10 @@
 name: refund_unsubscribe
 route_task: REFUND_UNSUBSCRIBE
 
+global_handlers:
+  other:
+    enabled: true
+
 states:
   - IDLE
   - CONFIRM_REFUND_UNSUBSCRIBE
@@ -9,6 +13,20 @@ states:
   - END
 
 terminal_states: [END]
+
+state_policies:
+  IDLE:
+    switch_policy: allow
+  CONFIRM_REFUND_UNSUBSCRIBE:
+    switch_policy: confirm
+    remind_after_other: true
+    reminder: "刚才的退款并退订还在等待确认，请回复“确认”或“取消”。"
+  ASK_ORDER_INFO:
+    switch_policy: allow
+  ASK_OTHER:
+    switch_policy: allow
+  END:
+    switch_policy: allow
 
 recovery:
   unknown:
@@ -164,7 +182,7 @@ templates:
   confirm: "我查到您有一笔{amount}元的{merchant}订单，是否确认退款并退订，同时停止后续自动续费？"
   ask_order_info: "暂未查到可退款并退订的订单，请提供下单手机号或订单号，我再为您查询。"
   retry_order_info: "根据您提供的信息仍未查到订单，请核对后重新提供手机号或订单号。"
-  done: "已为您提交退款并退订{merchant}，退订{effective_time}，后续不再自动续费；退款预计{eta}到账。请问还有其他疑问吗？"
+  done: "{refund_result}；{unsubscribe_result}。请问还有其他疑问吗？"
   cancel: "已取消本次退款和退订操作，还有其他问题吗？"
   already_done: "这笔订单的退款和退订已经提交，后续不会再自动续费，退款预计{eta}到账。"
   end: "感谢您的来电，祝您生活愉快。"

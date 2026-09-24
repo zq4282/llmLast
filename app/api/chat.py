@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from app.engine.graph import run_graph
-from app.engine.outputs import DialogueOutput, TERMINAL_OUTPUTS
+from app.engine.outputs import DialogueOutput
 from app.integrations.llm_api import LLMAPIError
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.session.store import SessionStoreError, session_store
@@ -53,6 +53,9 @@ def _chat(request: ChatRequest, session_id: str) -> ChatResponse:
                 "plugin_state": session.plugin_state,
                 "context": session.context,
                 "unrecognized_count": session.unrecognized_count,
+                "flows": session.flows,
+                "active_flow_id": session.active_flow_id,
+                "pending_switch": session.pending_switch,
             }
         )
     except LLMAPIError as exc:
@@ -64,21 +67,21 @@ def _chat(request: ChatRequest, session_id: str) -> ChatResponse:
 
     reply_text = result["reply"]
     output = result.get("out", DialogueOutput.CHAT)
-    if output in TERMINAL_OUTPUTS:
-        # HUMAN/END 的本轮回复仍正常返回，但服务端不再保留任何旧会话内容。
-        session_store.delete(session_id, tenant_id=request.tenant_id)
-    else:
-        session_store.save(
-            session_id,
-            business=result["business"],
-            plugin_state=result.get("plugin_state"),
-            call_info=result.get("call_info", call_info),
-            context=result.get("context", {}),
-            user_message=request.current_user_text,
-            assistant_message=reply_text,
-            tenant_id=request.tenant_id,
-            unrecognized_count=result.get("unrecognized_count", 0),
-        )
+    # 终态流程标记为 COMPLETED 后继续保留历史；没有 ACTIVE 流程时下一轮会重新顶级路由。
+    session_store.save(
+        session_id,
+        business=result.get("business"),
+        plugin_state=result.get("plugin_state"),
+        call_info=result.get("call_info", call_info),
+        context=result.get("context", {}),
+        user_message=request.current_user_text,
+        assistant_message=reply_text,
+        tenant_id=request.tenant_id,
+        unrecognized_count=result.get("unrecognized_count", 0),
+        flows=result.get("flows", []),
+        active_flow_id=result.get("active_flow_id"),
+        pending_switch=result.get("pending_switch"),
+    )
     data = {
         key: value
         for key, value in result.get("action_result", {}).items()

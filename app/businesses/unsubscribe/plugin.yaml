@@ -1,6 +1,10 @@
 name: unsubscribe
 route_task: UNSUBSCRIBE
 
+global_handlers:
+  other:
+    enabled: true
+
 states:
   - IDLE
   - CONFIRM_UNSUBSCRIBE
@@ -9,6 +13,20 @@ states:
   - END
 
 terminal_states: [END]
+
+state_policies:
+  IDLE:
+    switch_policy: allow
+  CONFIRM_UNSUBSCRIBE:
+    switch_policy: confirm
+    remind_after_other: true
+    reminder: "刚才的退订还在等待确认，请回复“退订”或“不退订”。"
+  ASK_ORDER_INFO:
+    switch_policy: allow
+  ASK_OTHER:
+    switch_policy: allow
+  END:
+    switch_policy: allow
 
 recovery:
   unknown:

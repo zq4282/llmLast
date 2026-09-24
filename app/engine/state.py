@@ -15,6 +15,18 @@ class CallInfoState(TypedDict):
     call_start_time: str
 
 
+class FlowState(TypedDict, total=False):
+    """一个可暂停、恢复或完成的业务流程快照。"""
+
+    flow_id: str
+    business: str
+    plugin_state: str
+    status: str
+    context: dict[str, Any]
+    unrecognized_count: int
+    completed_actions: list[dict[str, Any]]
+
+
 class ReplySource(StrEnum):
     TEMPLATE = "template"
     PLUGIN_FALLBACK = "plugin_fallback"
@@ -45,6 +57,11 @@ class ChatState(TypedDict, total=False):
     business: str
     # 【必需】插件内状态机位置，例如 IDLE/CONFIRM_REFUND/ASK_OTHER。
     plugin_state: str
+    # 【跨轮必需】多业务流程快照；business/plugin_state 是 ACTIVE 流程兼容投影。
+    flows: list[FlowState]
+    active_flow_id: str | None
+    # 【跨轮可选】需要用户确认后才能执行的插件切换。
+    pending_switch: dict[str, Any] | None
 
     # ===== 会话恢复控制（跨轮共享） =====
     # 连续未理解或当前插件无法处理的次数；匹配有效业务动作后立即清零。
@@ -73,6 +90,10 @@ class ChatState(TypedDict, total=False):
     reply_source: ReplySource
     # 【单轮临时】Router 已直接产出 unknown/human 时跳过插件理解。
     skip_understanding: bool
+    # 【单轮临时】other 二级路由次数，最大为 1。
+    reroute_count: int
+    # 【单轮临时】实际回答本轮消息的插件。
+    handled_by: str
 
     # ===== 执行与回复（单轮临时/最终输出） =====
     # 【本轮需要】run_action 调用业务 API 后的结果，reply 用于填充话术和更新 context。
