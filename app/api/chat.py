@@ -14,14 +14,17 @@ router = APIRouter(tags=["chat"])
 def chat(request: ChatRequest) -> ChatResponse:
     session_id = request.resolved_session_id()
     session = session_store.get(session_id)
-    active_business = session.business if session.context.get("_pending_slots") else None
     try:
         result = run_graph(
             {
                 "session_id": session_id,
                 "message": request.message,
                 "history": session.history,
-                "active_business": active_business,
+                "business": session.business,
+                "plugin_state": session.plugin_state,
+                "route_task": session.route_task,
+                "route_confidence": session.route_confidence,
+                "route_locked": session.route_locked,
                 "context": session.context,
             }
         )
@@ -32,6 +35,10 @@ def chat(request: ChatRequest) -> ChatResponse:
     session_store.save(
         session_id,
         business=result["business"],
+        plugin_state=result.get("plugin_state"),
+        route_task=result.get("route_task"),
+        route_confidence=result.get("route_confidence"),
+        route_locked=result.get("route_locked", False),
         context=result.get("context", {}),
         user_message=request.message,
         assistant_message=reply_text,
@@ -47,5 +54,6 @@ def chat(request: ChatRequest) -> ChatResponse:
         business=result["business"],
         intent=result["intent"],
         action=result.get("action"),
+        out=result.get("out", "CHAT"),
         data=data,
     )

@@ -32,26 +32,12 @@ const state = {
 
 const createSessionId = () => {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-  return `session-${Date.now().toString(36)}`;
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `session-${Date.now().toString(36)}-${randomPart}`;
 };
 
-const storedSession = (() => {
-  try {
-    return window.localStorage.getItem("chat-engine-session");
-  } catch {
-    return null;
-  }
-})();
-
-elements.session.value = storedSession || createSessionId();
-
-function persistSession() {
-  try {
-    window.localStorage.setItem("chat-engine-session", elements.session.value.trim());
-  } catch {
-    // 本地存储不可用时不影响对话。
-  }
-}
+// 每次打开页面都生成一个独立的随机会话，避免误用上次上下文。
+elements.session.value = createSessionId();
 
 function setSending(isSending) {
   state.loading = isSending;
@@ -111,7 +97,6 @@ function setInputError(message) {
 async function sendMessage(message) {
   const sessionId = elements.session.value.trim() || createSessionId();
   elements.session.value = sessionId;
-  persistSession();
   setSending(true);
   addMessage("user", message);
   state.turns += 1;
@@ -171,11 +156,8 @@ elements.input.addEventListener("keydown", (event) => {
   }
 });
 
-elements.session.addEventListener("change", persistSession);
-
 elements.newSession.addEventListener("click", () => {
   elements.session.value = createSessionId();
-  persistSession();
   state.turns = 0;
   state.response = null;
   elements.messages.replaceChildren();

@@ -1,22 +1,17 @@
-from app.engine.graph import run_graph
 from app.engine.loader import plugin_loader
 
 
 def test_all_plugins_are_loaded() -> None:
-    assert set(plugin_loader.load_all(force=True)) == {"refund", "query", "suspend", "chat"}
+    assert set(plugin_loader.load_all(force=True)) == {"refund"}
 
 
-def test_balance_query_runs_through_single_graph() -> None:
-    result = run_graph(
-        {
-            "session_id": "engine-test",
-            "message": "查询一下余额",
-            "history": [],
-            "active_business": None,
-            "context": {},
-        }
-    )
-    assert result["business"] == "query"
-    assert result["intent"] == "query_balance"
-    assert result["action_result"]["ok"] is True
-    assert "余额" in result["reply"]
+def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:
+    plugin = plugin_loader.get("refund")
+
+    assert plugin.states == ("IDLE", "CONFIRM_REFUND", "ASK_PHONE", "ASK_OTHER", "END")
+    assert plugin.terminal_states == {"END"}
+    transition = plugin.transition_for("CONFIRM_REFUND", "affirm")
+    assert transition is not None
+    assert transition.action == "submit_refund"
+    assert transition.next_state == "ASK_OTHER"
+    assert transition.out == "REFUND"

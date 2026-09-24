@@ -17,3 +17,9 @@ def query_order(order_id: str) -> dict:
     if order is None:
         return {"ok": False, "order_id": normalized, "error": "order_not_found"}
     return {"ok": True, **deepcopy(order)}
+
+
+def query_current_order() -> dict:
+    """模拟按来电账户查询最近一笔可退订单。"""
+
+    return {"ok": True, **deepcopy(_ORDERS["A1001"])}

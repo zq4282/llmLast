@@ -2,6 +2,7 @@
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,17 +11,84 @@ from app.engine.loader import Plugin
 from app.integrations.llm_api import LLMAPIError, OpenAICompatibleClient
 
 
+TASKS = {"REFUND", "BUSINESS_QA", "TRANSFER_HUMAN", "UNKNOWN"}
+
+TASK_ROUTER_PROMPT = """# Role
+
+语音客服系统的【任务路由识别器 Task Router】。
+唯一职责：分析用户当前的表达（必要时参考上一轮对话上下文），将其分类映射至唯一的预设 Task。仅负责分类识别，不执行业务逻辑。
+
+## 一、数据特性（ASR 文本容错）
+
+当前输入由语音识别（ASR）直接转写生成，**可能存在同音错别字、口语吞音、连字、无标点或无意义语气词**（例：“退前”->“退钱”、“退狂”->“退款”、“转仁工”->“转人工”）。请结合语境及发音容错还原真实含义，切勿仅因错别字直接归为 UNKNOWN。
+
+## 二、核心判定原则
+
+1. **当前句优先**：若用户当前意图明确，直接判定，不回溯历史。
+2. **上下文按需补全**：仅当用户表述为代词指代（如“就这个”、“弄它”）或短促确认（如“对”、“可以”、“赶紧办”）时，才参考上一轮客服播报补全语义；结合后仍指向不明则归为 UNKNOWN。
+3. **诉求优先于情绪与原因**：
+   - 情绪（愤怒、催促、不满）不代表具体意图，严禁因情绪推断任务。
+   - 复合诉求中，以“最终动作落脚点”为主任务（例：“不知道怎么扣的，赶紧退我钱” -> 主诉求为退款，判定为 REFUND）。
+4. **无明确任务指向的弱应答**：若用户仅输入“好的”、“行”、“对”，且上一轮并未发起与特定 Task 相关的意图确认，统一判定为 UNKNOWN。
+
+## 三、Task 枚举与边界
+
+- **REFUND**：明确要求退款、退费、撤销/退回已产生账单。
+  - *典型表达*：退款 / 退钱（含ASR错字：退前、退狂） / 把198元退掉 / 取消这笔扣款。
+  - *边界*：即使夹杂“没订过/不知道怎么开的/乱扣费”，只要最终有明确退款诉求，均判定为 REFUND。
+- **BUSINESS_QA**：了解、解释、查询账单或业务规则，无退款诉求。
+  - *典型表达*：198是什么钱 / 为什么扣费 / 什么时候开的 / 怎么取消自动续费 / 会员权益没到账。
+  - *边界*：仅表达“扣费质疑”（如“我没开过怎么扣了198”）但**未提及退款**，严禁推测其想退款，必须定为 BUSINESS_QA。
+- **TRANSFER_HUMAN**：要求人工介入，或明确拒绝机器服务。
+  - *典型表达*：转人工（含ASR错字：转仁工、抓人工） / 找人工客服 / 叫你们主管来 / 别跟我说了叫真人。
+- **UNKNOWN**：意图模糊、信息缺失严重、或单纯无实质业务指向的应答。
+  - *典型表达*：帮我处理下 / 这个怎么弄 / 不行 / 知道了 / 喂喂喂。
+
+## 四、禁止事项
+
+- 严禁执行查询、退款等业务动作或给出解答建议。
+- 严禁把“质疑扣费/表达不满”直接等同于“要求退款”。
+- 严禁在 JSON 之外输出任何解释、分析或前置后置文字。
+
+## 五、输出格式
+
+必须严格仅输出标准 JSON 格式。`confidence` 为 **0.0 到 1.0 之间的浮点数（保留两位小数）**：
+
+- **0.85 ~ 1.00**：意图极明确、关键词完备（如包含明确动词且无歧义）。
+- **0.60 ~ 0.84**：依赖上下文补全、存在轻度 ASR 谐音推断，或表达略显口语化但主体明确。
+- **0.00 ~ 0.59**：语义严重缺失、多意图混杂冲突、或归入 UNKNOWN。
+```json
+{
+  "task": "REFUND | BUSINESS_QA | TRANSFER_HUMAN | UNKNOWN",
+  "confidence": 0.95
+}
+```"""
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    task: str
+    confidence: float
+
+
+@dataclass(frozen=True)
+class IntentDecision:
+    intent: str
+    confidence: float
+    slots: dict[str, Any]
+
+
 class LLMSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    llm_api_key: str = "sk-ws-H.PLHRLEE.rtWE.MEYCIQDgm_ni_Cb8BdPBa384kCTfU8QWngbpbksHFkP1Tg5nGgIhAIE09-_l0H6-zWQCV0DZsU_ZRtTqw6Mb4KD1Iqk1lJvk"
-    llm_base_url: str = "https://ws-n6nxk2gz1r2ars3h.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    llm_api_key: str = ""
+    llm_base_url: str = ""
     llm_model: str = "qwen-turbo"
     llm_timeout: float = 4.0
 
 
 class IntentLLM:
-    """有 Key 时可调用真实模型；失败时自动回退到确定性规则。"""
+    """顶层任务路由和插件内意图识别均交给模型，程序不猜测意图。"""
 
     def __init__(self) -> None:
         settings = LLMSettings()
@@ -36,70 +104,110 @@ class IntentLLM:
             else None
         )
 
-    def route(self, message: str, plugins: dict[str, Plugin], active_business: str | None) -> str:
-        scores = {
-            name: sum(2 if keyword in message else 0 for keyword in plugin.keywords)
-            for name, plugin in plugins.items()
-            if name != "chat"
-        }
-        best = max(scores, key=scores.get) if scores else "chat"
-        if scores and scores[best] > 0:
-            return best
-        if active_business and active_business in plugins and active_business != "chat":
-            return active_business
-        return "chat"
+    def classify_route(self, message: str, history: list[dict[str, str]]) -> RouteDecision:
+        """只做 Task 分类。是否复用已有结果由 router 节点通过共享状态决定。"""
+
+        if self.client:
+            decision = self._route_with_llm(message, history)
+            if decision:
+                return decision
+        return RouteDecision(task="UNKNOWN", confidence=0.0)
+
+    def _route_with_llm(
+        self,
+        message: str,
+        history: list[dict[str, str]],
+    ) -> RouteDecision | None:
+        previous_assistant = next(
+            (item.get("content", "") for item in reversed(history) if item.get("role") == "assistant"),
+            "",
+        )
+        user_input = json.dumps(
+            {"上一轮客服播报": previous_assistant, "当前用户表达": message},
+            ensure_ascii=False,
+        )
+        try:
+            content = self.client.chat(  # type: ignore[union-attr]
+                [
+                    {"role": "system", "content": TASK_ROUTER_PROMPT},
+                    {"role": "user", "content": user_input},
+                ]
+            )
+            if not isinstance(content, str):
+                return None
+            data = self._parse_json_object(content)
+            task = str(data.get("task", "")).upper()
+            confidence = float(data.get("confidence"))
+            if task not in TASKS or not 0.0 <= confidence <= 1.0:
+                return None
+            return RouteDecision(task=task, confidence=round(confidence, 2))
+        except (LLMAPIError, json.JSONDecodeError, TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _parse_json_object(content: str) -> dict[str, Any]:
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
+        data = json.loads(cleaned)
+        if not isinstance(data, dict):
+            raise TypeError("LLM 路由结果必须是 JSON object")
+        return data
 
     def understand(
         self,
         message: str,
         plugin: Plugin,
+        plugin_state: str,
         context: dict[str, Any],
-    ) -> tuple[str, dict[str, Any]]:
+        history: list[dict[str, str]],
+    ) -> IntentDecision:
         if self.client:
-            llm_result = self._understand_with_llm(message, plugin)
+            llm_result = self._understand_with_llm(
+                message,
+                plugin,
+                plugin_state,
+                context,
+                history,
+            )
             if llm_result:
-                intent, slots = llm_result
-                return intent, {**context, **slots, "_intent": intent}
+                return llm_result
+        return IntentDecision(intent="unknown", confidence=0.0, slots={})
 
-        scores = {
-            name: sum(1 for keyword in intent.keywords if keyword in message)
-            for name, intent in plugin.intents.items()
+    def _understand_with_llm(
+        self,
+        message: str,
+        plugin: Plugin,
+        plugin_state: str,
+        context: dict[str, Any],
+        history: list[dict[str, str]],
+    ) -> IntentDecision | None:
+        history_text = "\n".join(
+            f"{'系统' if item.get('role') == 'assistant' else '用户'}：{item.get('content', '')}"
+            for item in history[-10:]
+        ) or "（无）"
+        prompt = plugin.prompt
+        replacements = {
+            "{state}": plugin_state,
+            "{context}": json.dumps(context, ensure_ascii=False),
+            "{history}": history_text,
+            "{user_input}": message,
         }
-        best = max(scores, key=scores.get)
-        previous_intent = context.get("_intent")
-        intent_name = best if scores[best] > 0 else (
-            previous_intent if previous_intent in plugin.intents else plugin.default_intent
-        )
-        slots = dict(context)
-        for config in plugin.intents.values():
-            for slot_name, pattern in config.slot_patterns.items():
-                match = re.search(pattern, message, flags=re.IGNORECASE)
-                if match:
-                    value = match.groupdict().get("value") if match.groupdict() else match.group(1)
-                    slots[slot_name] = value.strip()
-        slots["_intent"] = intent_name
-        return intent_name, slots
-
-    def _understand_with_llm(self, message: str, plugin: Plugin) -> tuple[str, dict[str, Any]] | None:
-        schema = {
-            name: {"keywords": list(intent.keywords), "slots": list(intent.slot_patterns)}
-            for name, intent in plugin.intents.items()
-        }
-        prompt = (
-            "识别用户意图并抽取槽位。只返回 JSON："
-            '{"intent":"...","slots":{}}。可选意图：'
-            f"{json.dumps(schema, ensure_ascii=False)}\n用户：{message}"
-        )
+        for placeholder, value in replacements.items():
+            prompt = prompt.replace(placeholder, value)
         try:
             content = self.client.chat([{"role": "user", "content": prompt}]) if self.client else ""
-            content = re.sub(r"^```(?:json)?|```$", "", content.strip()).strip()
-            data = json.loads(content)
+            if not isinstance(content, str):
+                return None
+            data = self._parse_json_object(content)
             intent = data.get("intent")
-            if intent in plugin.intents and isinstance(data.get("slots", {}), dict):
-                return intent, data["slots"]
-        except (LLMAPIError, json.JSONDecodeError, TypeError):
+            slots = data.get("slots")
+            confidence = float(data.get("confidence"))
+            if not isinstance(intent, str) or not intent or not isinstance(slots, dict):
+                return None
+            if not 0.0 <= confidence <= 1.0:
+                return None
+            explicit_slots = {str(key): value for key, value in slots.items() if value is not None}
+            return IntentDecision(intent, round(confidence, 2), explicit_slots)
+        except (LLMAPIError, json.JSONDecodeError, TypeError, ValueError):
             return None
-        return None
-
 
 intent_llm = IntentLLM()

@@ -32,4 +32,5 @@ class ChatResponse(BaseModel):
     business: str
     intent: str
     action: str | None = None
+    out: str = "CHAT"
     data: dict[str, Any] = Field(default_factory=dict)

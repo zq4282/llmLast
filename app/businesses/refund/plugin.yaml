@@ -1,36 +1,134 @@
 name: refund
-description: 订单退款与退款进度查询
-keywords: [退款, 退钱, 退款进度, 退款状态]
-default_intent: apply_refund
+keywords: ["退", "扣", "退钱", "为什么扣"]
 
-intents:
-  apply_refund:
-    keywords: [退款, 退钱, 申请退款, 不想要]
-    action: submit_refund
-    slot_patterns:
-      order_id: '(?:订单(?:号)?|order(?:\s*id)?)?[：:\s#-]*(?P<value>[A-Za-z]\d{4,})'
-      reason: '(?:原因是|因为|理由[是：:]?)[\s]*(?P<value>[^，。,.]{2,40})'
-  query_refund_status:
-    keywords: [退款进度, 退款状态, 退款到哪]
-    action: query_refund
-    slot_patterns:
-      order_id: '(?:订单(?:号)?|order(?:\s*id)?)?[：:\s#-]*(?P<value>[A-Za-z]\d{4,})'
+states:
+  - IDLE
+  - CONFIRM_REFUND
+  - ASK_PHONE
+  - ASK_OTHER
+  - END
+
+terminal_states: [END]
+
+prompt: |
+  你是退款客服系统的意图识别模块。你只负责理解用户说的话，不负责回复用户，不决定是否退款，不调用任何工具，不输出对外动作。
+
+  当前状态：{state}
+  当前已查到的订单信息：{context}
+  最近对话：
+  {history}
+  用户当前说：{user_input}
+
+  你的任务：
+  1. 结合最近对话和当前状态，判断用户当前这句话的意图。
+  2. 抽取用户明确说出的槽位。
+  3. 只输出 JSON，不要 Markdown，不要解释，不要输出 JSON 以外的任何内容。
+
+  意图范围：
+  - refund_request：用户要求退款、质问扣款、问为什么扣钱、说赶紧退、退我钱。
+  - provide_info：用户主动提供手机号或订单号。
+  - affirm：用户同意、确认，包括"退了吧/可以/好/行/同意/就是那笔/对/是"。
+  - negate：用户拒绝、否定，包括"不用/别退/先不退/不是/不对"。
+  - other：其他咨询、问题、抱怨。
+  - end：用户表示没有其他问题，包括"没有了/没了/没事了/就这样"。
+  - human：用户要求转人工、找客服、投诉。
+  - unknown：无法判断。
+
+  槽位定义：
+  - backup_phone：用户说的手机号，11 位数字，没有则 null。
+  - order_id：用户说的订单号，没有则 null。
+
+  输出格式：
+  {
+    "intent": "refund_request",
+    "confidence": 0.0,
+    "slots": {
+      "backup_phone": null,
+      "order_id": null
+    }
+  }
+
+  判断规则：
+  1. 必须结合最近对话判断。用户说"就是那笔/对/是"，如果上一轮系统在问"是否退款"，应判 affirm。
+  2. 用户说"不是/不对"，如果上一轮系统在确认订单，应判 negate。
+  3. 用户说"退了吧/可以/好/行/同意"，当前状态是 CONFIRM_REFUND，判 affirm。
+  4. 用户说"不用了/先不退/别退"，当前状态是 CONFIRM_REFUND，判 negate。
+  5. 用户说"没有了/没了/没事了"，当前状态是 ASK_OTHER，判 end。
+  6. 用户说"138xxxxxxxx"或"手机号是138xxxxxxxx"，判 provide_info，slots.backup_phone=138xxxxxxxx。
+  7. 用户说"订单号是ORD123"或"ORD123"，判 provide_info，slots.order_id=ORD123。
+  8. 用户说"为什么扣钱/赶紧退/退我钱"，判 refund_request。
+  9. 用户说"转人工/找客服/投诉"，判 human。
+  10. 不要编造手机号、订单号、金额、时间，用户没说的槽位一律 null。
+  11. 不确定就输出 unknown，confidence 低于 0.6，不要猜。
+  12. 不要输出 CHAT/REFUND/HUMAN，这些由程序决定。
+  13. 只输出 JSON。
+
+  示例：
+  当前状态：IDLE
+  最近对话：（无）
+  用户：为什么扣我钱，赶紧退过来
+  输出：{"intent":"refund_request","confidence":0.93,"slots":{"backup_phone":null,"order_id":null}}
+
+  当前状态：CONFIRM_REFUND
+  最近对话：
+  用户：为什么扣我钱？
+  系统：查到您一笔 29.9 元扣款，是否退款？
+  用户：就是那笔
+  输出：{"intent":"affirm","confidence":0.95,"slots":{"backup_phone":null,"order_id":null}}
+
+  当前状态：ASK_OTHER
+  最近对话：
+  用户：退了吧
+  系统：已提交退款，还有其他疑问吗？
+  用户：没有了
+  输出：{"intent":"end","confidence":0.97,"slots":{"backup_phone":null,"order_id":null}}
 
 actions:
-  submit_refund:
-    handler: handlers.submit_refund
-    required_slots: [order_id]
-    success_template: refund_submitted
-  query_refund:
-    handler: handlers.query_refund
-    required_slots: [order_id]
-    success_template: refund_status
+  - state: IDLE
+    intent: refund_request
+    do: query_order
+    reply: confirm
+    next: CONFIRM_REFUND
+    out: CHAT
+  - state: ASK_PHONE
+    intent: provide_info
+    do: query_order
+    reply: confirm
+    next: CONFIRM_REFUND
+    out: CHAT
+  - state: CONFIRM_REFUND
+    intent: affirm
+    do: submit_refund
+    reply: done
+    next: ASK_OTHER
+    out: REFUND
+  - state: CONFIRM_REFUND
+    intent: negate
+    do: none
+    reply: cancel
+    next: IDLE
+    out: CHAT
+  - state: ASK_OTHER
+    intent: refund_request
+    do: none
+    reply: already_done
+    next: ASK_OTHER
+    out: CHAT
+  - state: ASK_OTHER
+    intent: end
+    do: none
+    reply: end
+    next: END
+    out: CHAT
 
 templates:
-  ask_order_id: 请提供需要退款的订单号，例如 A1001。
-  refund_submitted: '退款申请已提交：订单 {order_id}，退款金额 ¥{amount}，退款单号 {refund_id}，当前状态为 {status}。'
-  refund_status: '订单 {order_id} 的退款单 {refund_id} 当前状态为 {status}。'
-  error_order_not_found: '没有找到订单 {order_id}，请核对订单号后重试。'
-  error_already_refunded: '订单 {order_id} 已完成退款，无需重复申请。'
-  error_refund_not_found: '订单 {order_id} 暂无退款记录。'
-  error: 退款服务暂时不可用，请稍后重试。
+  confirm: "我查到您有一笔 {amount} 元在 {merchant} 的扣款，是否需要为您申请退款？"
+  done: "已为您提交退款，预计 {eta} 到账，具体到账时间以账单为准。请问还有其他疑问吗？"
+  cancel: "已取消退款，还有其他问题吗？"
+  already_done: "这笔退款已经提交过了，预计 {eta} 到账，您可以在账单里查看。"
+  end: "感谢您的来电，祝您生活愉快。"
+
+fallbacks:
+  human: "正在为您转接人工，请稍候。"
+  unknown: "抱歉，我没太听明白，您能再说一遍吗？"
+  end: "本次服务已结束，感谢您的来电。"

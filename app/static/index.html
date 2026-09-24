@@ -37,11 +37,12 @@
           <label for="session-id">会话 ID</label>
           <div class="session-control__row">
             <input id="session-id" name="session-id" type="text" autocomplete="off" spellcheck="false" aria-describedby="session-help">
-            <button class="icon-button" id="new-session" type="button" aria-label="新建会话" title="新建会话">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            <button class="session-random-button" id="new-session" type="button" aria-label="生成随机会话 ID" title="生成随机会话 ID">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"/></svg>
+              <span>随机会话</span>
             </button>
           </div>
-          <p id="session-help">同一个 ID 会保留多轮上下文。</p>
+          <p id="session-help">同一个 ID 会保留多轮上下文；点击“随机会话”可开始新会话。</p>
         </div>
       </section>
 
@@ -66,10 +67,10 @@
           <form class="composer" id="chat-form" novalidate>
             <label for="message-input">用户消息</label>
             <div class="composer__field">
-              <textarea id="message-input" name="message" rows="3" maxlength="4000" placeholder="输入退款、查询或停机保号请求" aria-describedby="message-help" required></textarea>
+              <textarea id="message-input" name="message" rows="3" maxlength="4000" placeholder="输入退款、查询或停机保号请求" aria-describedby="message-help" required>为啥扣我23元，我要退款</textarea>
               <div class="composer__meta">
                 <span id="message-help">Enter 发送 · Shift + Enter 换行</span>
-                <span id="character-count">0 / 4000</span>
+                <span id="character-count">12 / 4000</span>
               </div>
             </div>
             <button class="send-button" id="send-button" type="submit">

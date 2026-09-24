@@ -252,17 +252,21 @@ kbd {
   font-size: var(--text-sm);
 }
 
-.icon-button {
-  display: grid;
-  place-items: center;
-  width: 44px;
+.session-random-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
   min-height: 44px;
-  padding: 0;
+  padding-inline: var(--space-sm);
   background: var(--color-ink);
   border: var(--rule-thin) solid var(--color-ink);
   border-radius: var(--radius-sm);
   color: var(--color-paper);
+  font-size: var(--text-sm);
+  font-weight: 600;
   transition: background-color var(--dur-short) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+  white-space: nowrap;
 }
 
 .workbench {
@@ -806,7 +810,7 @@ kbd {
     color: var(--color-accent);
   }
 
-  .icon-button:hover,
+  .session-random-button:hover,
   .send-button:hover:not(:disabled) {
     background: var(--color-accent-hover);
   }
@@ -821,7 +825,7 @@ kbd {
 }
 
 .command-trigger:active,
-.icon-button:active,
+.session-random-button:active,
 .send-button:active:not(:disabled),
 .copy-button:active:not(:disabled),
 .command-item:active {
@@ -835,7 +839,7 @@ kbd {
 }
 
 .send-button:focus-visible,
-.icon-button:focus-visible {
+.session-random-button:focus-visible {
   outline-color: var(--color-paper);
   box-shadow: 0 0 0 4px var(--color-focus);
 }

@@ -9,6 +9,10 @@ from typing import Any
 @dataclass
 class Session:
     business: str | None = None
+    plugin_state: str | None = None
+    route_task: str | None = None
+    route_confidence: float | None = None
+    route_locked: bool = False
     context: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
 
@@ -28,6 +32,10 @@ class MemorySessionStore:
         session_id: str,
         *,
         business: str,
+        plugin_state: str | None = None,
+        route_task: str | None = None,
+        route_confidence: float | None = None,
+        route_locked: bool = False,
         context: dict[str, Any],
         user_message: str,
         assistant_message: str,
@@ -35,6 +43,10 @@ class MemorySessionStore:
         with self._lock:
             session = self._sessions.setdefault(session_id, Session())
             session.business = business
+            session.plugin_state = plugin_state
+            session.route_task = route_task
+            session.route_confidence = route_confidence
+            session.route_locked = route_locked
             session.context = deepcopy(context)
             session.history.extend(
                 [
