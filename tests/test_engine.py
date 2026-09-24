@@ -71,6 +71,15 @@ def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:
     assert end_transition.out == "END"
 
 
+def test_refund_prompt_routes_unsubscribe_and_combined_requests_to_other() -> None:
+    prompt = plugin_loader.get("refund").prompt
+
+    assert "用户只要求退订、取消订阅、关闭自动续费" in prompt
+    assert "用户同时要求退款和退订时" in prompt
+    assert "必须判 other" in prompt
+    assert "用户：我要退款与退订" in prompt
+
+
 def test_human_plugin_asks_reason_before_handoff() -> None:
     plugin = plugin_loader.get("human")
 

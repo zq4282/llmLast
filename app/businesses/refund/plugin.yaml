@@ -29,9 +29,9 @@ state_policies:
     switch_policy: allow
   # 已进入退款确认环节，切换前必须征得用户同意。
   CONFIRM_REFUND:
-    switch_policy: confirm
+    switch_policy: allow
     # other 回答闲聊后，是否由引擎追加当前退款流程提醒。
-    remind_after_other: true
+    remind_after_other: false
     # 追加提醒模板；由引擎生成，other 插件本身看不到退款上下文。
     reminder: "刚才的退款还在等待确认，请回复“退款”或“不退款”。"
   # 收集订单信息时允许切换；原退款流程会保存为 SUSPENDED。
@@ -86,11 +86,11 @@ prompt: |
   3. 只输出 JSON，不要 Markdown，不要解释，不要输出 JSON 以外的任何内容。
 
   意图范围：
-  - refund_request：用户要求退款、质问扣款、问为什么扣钱、说赶紧退、退我钱。
+  - refund_request：用户只要求退款、退回已扣费用，或在当前退款流程中继续表达退款诉求；不能包含退订、取消订阅、关闭自动续费等诉求。
   - provide_info：用户主动提供手机号或订单号。
   - affirm：用户同意、确认，包括"退了吧/可以/好/行/同意/就是那笔/对/是/推了"。
   - negate：用户拒绝、否定，包括"不用/别退/先不退/不是/不对"。
-  - other：能够理解具体含义、但不属于当前退款流程的其他咨询、问题或抱怨，例如咨询发票、套餐、物流。
+  - other：能够理解具体含义、但不只属于当前退款流程的其他诉求。包括只要求退订，以及同时要求退款和退订；也包括咨询发票、套餐、物流等问题。
   - end：用户表示没有其他问题，包括"没有了/没了/没事了/就这样"。
   - human：用户要求转人工、找客服、投诉。
   - unknown：乱码、随机字符、无意义重复或结合上下文仍无法判断，例如"asdfasdf"、"qwer123"。不得将无明确语义的内容判为 other。
@@ -117,19 +117,34 @@ prompt: |
   5. 用户说"没有了/没了/没事了"，当前状态是 ASK_OTHER，判 end。
   6. 用户说"15838996373"或"手机号是15838996373"，判 provide_info，slots.backup_phone=15838996373。
   7. 用户说"订单号是ORD123"或"ORD123"，判 provide_info，slots.order_no=ORD123。
-  8. 用户说"为什么扣钱/赶紧退/退我钱"，判 refund_request。
+  8. 用户只说"为什么扣钱/赶紧退/退我钱"，且没有要求退订、取消订阅或关闭自动续费时，判 refund_request。
   9. 用户说"转人工/找客服/投诉"，判 human。
   10. 不要编造手机号、订单号、金额、时间，用户没说的槽位一律 null。
   11. 不确定就输出 unknown，confidence 低于 0.6，不要猜。
   12. 不要输出 CHAT/REFUND/UNSUBSCRIBE/REFUND_UNSUBSCRIBE/HUMAN/END，这些由程序决定。
   13. 只输出 JSON。
   14. other 必须具有可复述的明确语义；乱码、随机字母数字、无意义字符必须判 unknown，confidence 低于 0.6。
+  15. 用户只要求退订、取消订阅、关闭自动续费或停止后续扣费时，必须判 other，不能判 refund_request。
+  16. 用户同时要求退款和退订时，即使句子中包含“退款”“退钱”等退款关键词，也必须判 other，交给 other 插件识别 REFUND_UNSUBSCRIBE，不能判 refund_request。
+  17. “退款与退订”“退款并取消订阅”“这次钱退给我以后别再扣”“退钱再退订”都属于组合业务，必须判 other。
 
   示例：
   当前状态：IDLE
   最近对话：（无）
   用户：为什么扣我钱，赶紧退过来
   输出：{"intent":"refund_request","confidence":0.93,"slots":{"backup_phone":null,"order_no":null}}
+
+  当前状态：CONFIRM_REFUND
+  最近对话：
+  系统：查到您一笔 19.9 元扣款，是否需要申请退款？
+  用户：我要退订
+  输出：{"intent":"other","confidence":0.98,"slots":{"backup_phone":null,"order_no":null}}
+
+  当前状态：CONFIRM_REFUND
+  最近对话：
+  系统：查到您一笔 19.9 元扣款，是否需要申请退款？
+  用户：我要退款与退订
+  输出：{"intent":"other","confidence":0.99,"slots":{"backup_phone":null,"order_no":null}}
 
   当前状态：CONFIRM_REFUND
   最近对话：

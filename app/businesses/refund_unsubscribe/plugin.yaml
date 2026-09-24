@@ -18,7 +18,7 @@ state_policies:
   IDLE:
     switch_policy: allow
   CONFIRM_REFUND_UNSUBSCRIBE:
-    switch_policy: confirm
+    switch_policy: allow
     remind_after_other: true
     reminder: "刚才的退款并退订还在等待确认，请回复“确认”或“取消”。"
   ASK_ORDER_INFO:
