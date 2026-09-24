@@ -133,13 +133,25 @@ def _normalize_order(order: dict[str, Any]) -> dict[str, Any]:
 
 def _find_order(
     *,
+    plugin_name: str,
     order_no: str | None = None,
     phone: str | None = None,
 ) -> dict[str, Any]:
+    def matches_plugin(order: dict[str, Any]) -> bool:
+        if order.get("payStatus") != "支付成功":
+            return False
+        if order.get("refundStatus") != "未退款":
+            return False
+        if plugin_name == "refund":
+            return True
+        if plugin_name in {"unsubscribe", "refund_unsubscribe"}:
+            return order.get("subscriptionStatus") == "订阅中"
+        return False
+
     if order_no:
         normalized_order_no = order_no.strip().upper()
         order = _ORDERS.get(normalized_order_no)
-        if order is None:
+        if order is None or not matches_plugin(order):
             return {
                 "ok": False,
                 "error": "order_not_found",
@@ -150,14 +162,19 @@ def _find_order(
     if phone:
         normalized_phone = "".join(character for character in phone if character.isdigit())
         orders = _PHONE_ORDERS.get(normalized_phone)
-        if not orders:
+        matching_orders = {
+            number: order
+            for number, order in (orders or {}).items()
+            if matches_plugin(order)
+        }
+        if not matching_orders:
             return {
                 "ok": False,
                 "error": "order_not_found",
                 "phone": normalized_phone,
             }
         _, latest_order = max(
-            orders.items(),
+            matching_orders.items(),
             key=lambda item: (str(item[1].get("payTime") or ""), item[0]),
         )
         return _normalize_order(latest_order)
@@ -170,6 +187,7 @@ def query_order(state: dict[str, Any]) -> ActionResult:
 
     values = {**state.get("context", {}), **state.get("slots", {})}
     call_info = state.get("call_info", {})
+    plugin_name = str(state.get("business") or "").strip()
 
     query_params: dict[str, str] = {}
     if values.get("order_no"):
@@ -180,7 +198,7 @@ def query_order(state: dict[str, Any]) -> ActionResult:
         query_params["phone"] = str(call_info["caller"])
 
     # 查询优先级：订单号 > 用户补充手机号 > 本次通话的主叫号码。
-    order = _find_order(**query_params)
+    order = _find_order(plugin_name=plugin_name, **query_params)
     data = {
         key: value
         for key, value in order.items()
