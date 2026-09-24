@@ -14,7 +14,7 @@ from app.engine.recovery import (
 )
 from app.engine.render import render_template
 from app.engine.route_tasks import ROUTE_TASK_UNKNOWN
-from app.engine.state import ChatState
+from app.engine.state import ChatState, ReplySource
 
 
 def _use_plugin_recovery_reply(
@@ -40,7 +40,7 @@ def _use_plugin_recovery_reply(
     return {
         **decision,
         "reply_key": reply_key,
-        "use_system_fallback": False,
+        "reply_source": ReplySource.PLUGIN_FALLBACK,
     }
 
 
@@ -63,44 +63,26 @@ def _recovery_for_state(
 def router(state: ChatState) -> dict[str, Any]:
     """首次由模型选插件；锁定后只读共享状态，不再调用顶层 Router 模型。"""
 
-    route_task = state.get("route_task")
-    if state.get("route_locked") and route_task and route_task != ROUTE_TASK_UNKNOWN:
-        existing_business = state.get("business")
-        plugin = (
-            plugin_loader.get(existing_business)
-            if existing_business and existing_business in plugin_loader.plugins
-            else plugin_loader.get_by_route_task(route_task)
-        )
+    existing_business = state.get("business")
+    if existing_business and existing_business in plugin_loader.plugins:
+        plugin = plugin_loader.get(existing_business)
         return {
             "business": plugin.name,
-            "route_task": route_task,
-            "route_confidence": state.get("route_confidence"),
-            "route_locked": True,
             "skip_understanding": False,
-            "error": None,
         }
 
     decision = intent_llm.classify_route(state["message"], state.get("history", []))
     if decision.task in {ROUTE_TASK_UNKNOWN, DialogueOutput.HUMAN.value}:
         return {
             "business": state.get("business") or "system",
-            "route_task": decision.task,
-            "route_confidence": decision.confidence,
-            "route_locked": decision.task == DialogueOutput.HUMAN.value,
             "intent": "human" if decision.task == DialogueOutput.HUMAN.value else "unknown",
-            "intent_confidence": decision.confidence,
             "slots": {},
             "skip_understanding": True,
-            "error": None,
         }
     plugin = plugin_loader.get_by_route_task(decision.task)
     return {
         "business": plugin.name,
-        "route_task": decision.task,
-        "route_confidence": decision.confidence,
-        "route_locked": decision.task != ROUTE_TASK_UNKNOWN,
         "skip_understanding": False,
-        "error": None,
     }
 
 
@@ -125,7 +107,6 @@ def understand(state: ChatState) -> dict[str, Any]:
     return {
         "plugin_state": plugin_state,
         "intent": decision.intent,
-        "intent_confidence": decision.confidence,
         "slots": decision.slots,
     }
 
@@ -145,10 +126,8 @@ def decide(state: ChatState) -> dict[str, Any]:
             "reply_key": "end",
             "next_plugin_state": plugin_state,
             "out": DialogueOutput.END,
-            "use_fallback": True,
-            "use_system_fallback": False,
+            "reply_source": ReplySource.PLUGIN_FALLBACK,
             "unrecognized_count": 0,
-            "conversation_status": "ENDED",
             "handoff_reason": None,
         }
 
@@ -159,16 +138,13 @@ def decide(state: ChatState) -> dict[str, Any]:
         unsupported = _recovery_for_state(state, trigger="unsupported")
         assert unsupported is not None
         return unsupported
-    next_status = "ENDED" if transition.out == DialogueOutput.END else "BOT"
     return {
         "action": transition.action,
         "reply_key": transition.reply,
         "next_plugin_state": transition.next_state,
         "out": transition.out,
-        "use_fallback": False,
-        "use_system_fallback": False,
+        "reply_source": ReplySource.TEMPLATE,
         "unrecognized_count": 0,
-        "conversation_status": next_status,
         "handoff_reason": None,
     }
 
@@ -183,15 +159,20 @@ def run_action(state: ChatState) -> dict[str, Any]:
             dict(state),
         )
         return {"action_result": result}
-    except Exception as exc:  # 外部适配器异常统一收敛，不能击穿聊天接口
-        return {"action_result": action_failure("internal_error"), "error": str(exc)}
+    except Exception:  # 外部适配器异常统一收敛，不能击穿聊天接口
+        return {"action_result": action_failure("internal_error")}
 
 
 def reply(state: ChatState) -> dict[str, Any]:
     """渲染插件话术，合并业务结果，并推进插件状态。"""
 
     result = state.get("action_result", {})
-    plugin = None if state.get("use_system_fallback") else plugin_loader.get(state["business"])
+    reply_source = state.get("reply_source", ReplySource.TEMPLATE)
+    plugin = (
+        None
+        if reply_source == ReplySource.SYSTEM_FALLBACK
+        else plugin_loader.get(state["business"])
+    )
     transition = (
         plugin.transition_for(
             state.get("plugin_state", plugin.initial_state),
@@ -221,9 +202,9 @@ def reply(state: ChatState) -> dict[str, Any]:
             out = DialogueOutput.CHAT
     else:
         reply_key = state.get("reply_key", "unknown")
-        if state.get("use_system_fallback"):
+        if reply_source == ReplySource.SYSTEM_FALLBACK:
             template = SYSTEM_FALLBACKS.get(reply_key, SYSTEM_FALLBACKS["unknown_first"])
-        elif state.get("use_fallback"):
+        elif reply_source == ReplySource.PLUGIN_FALLBACK:
             assert plugin is not None
             template = plugin.fallbacks.get(reply_key, plugin.fallbacks.get("unknown", ""))
         else:
@@ -251,9 +232,7 @@ def reply(state: ChatState) -> dict[str, Any]:
         "context": context,
         "out": out,
         "unrecognized_count": state.get("unrecognized_count", 0),
-        "conversation_status": state.get("conversation_status", "BOT"),
         "handoff_reason": state.get("handoff_reason"),
-        "handoff_id": state.get("handoff_id"),
     }
 
 

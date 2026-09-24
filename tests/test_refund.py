@@ -41,8 +41,6 @@ def test_refund_state_machine_runs_across_turns(monkeypatch) -> None:
             "history": [],
             "business": None,
             "plugin_state": None,
-            "route_task": None,
-            "route_locked": False,
             "context": {},
         }
     )
@@ -62,9 +60,6 @@ def test_refund_state_machine_runs_across_turns(monkeypatch) -> None:
             ],
             "business": first["business"],
             "plugin_state": first["plugin_state"],
-            "route_task": first["route_task"],
-            "route_confidence": first["route_confidence"],
-            "route_locked": first["route_locked"],
             "context": first["context"],
         }
     )
@@ -97,8 +92,6 @@ def test_refund_asks_for_order_info_and_continues_with_phone(monkeypatch) -> Non
             "history": [],
             "business": None,
             "plugin_state": None,
-            "route_task": None,
-            "route_locked": False,
             "context": {},
         }
     )
@@ -117,9 +110,6 @@ def test_refund_asks_for_order_info_and_continues_with_phone(monkeypatch) -> Non
             ],
             "business": first["business"],
             "plugin_state": first["plugin_state"],
-            "route_task": first["route_task"],
-            "route_confidence": first["route_confidence"],
-            "route_locked": first["route_locked"],
             "context": first["context"],
         }
     )
@@ -140,9 +130,6 @@ def test_refund_asks_for_order_info_and_continues_with_phone(monkeypatch) -> Non
             ],
             "business": second["business"],
             "plugin_state": second["plugin_state"],
-            "route_task": second["route_task"],
-            "route_confidence": second["route_confidence"],
-            "route_locked": second["route_locked"],
             "context": second["context"],
         }
     )
@@ -169,8 +156,6 @@ def test_refund_queries_order_with_caller_from_call_info(monkeypatch) -> None:
             "history": [],
             "business": None,
             "plugin_state": None,
-            "route_task": None,
-            "route_locked": False,
             "context": {},
             "call_info": {
                 "caller": "13800138000",
@@ -203,9 +188,6 @@ def test_refund_keeps_asking_when_supplied_order_is_not_found(monkeypatch) -> No
             "history": [],
             "business": "refund",
             "plugin_state": "ASK_ORDER_INFO",
-            "route_task": "REFUND",
-            "route_confidence": 0.97,
-            "route_locked": True,
             "context": {},
         }
     )
@@ -226,9 +208,6 @@ def test_refund_keeps_asking_when_supplied_order_is_not_found(monkeypatch) -> No
             ],
             "business": result["business"],
             "plugin_state": result["plugin_state"],
-            "route_task": result["route_task"],
-            "route_confidence": result["route_confidence"],
-            "route_locked": result["route_locked"],
             "context": result["context"],
         }
     )
@@ -252,9 +231,6 @@ def test_refund_continues_when_user_supplies_order_number(monkeypatch) -> None:
             "history": [],
             "business": "refund",
             "plugin_state": "ASK_ORDER_INFO",
-            "route_task": "REFUND",
-            "route_confidence": 0.97,
-            "route_locked": True,
             "context": {},
         }
     )
@@ -281,9 +257,6 @@ def test_refund_end_state_returns_end_output(monkeypatch) -> None:
             "history": [],
             "business": "refund",
             "plugin_state": "ASK_OTHER",
-            "route_task": "REFUND",
-            "route_confidence": 0.97,
-            "route_locked": True,
             "context": {"order_no": "ORD202405010001"},
         }
     )
@@ -298,9 +271,6 @@ def test_refund_end_state_returns_end_output(monkeypatch) -> None:
             "history": [],
             "business": "refund",
             "plugin_state": ended["plugin_state"],
-            "route_task": "REFUND",
-            "route_confidence": 0.97,
-            "route_locked": True,
             "context": ended["context"],
         }
     )

@@ -16,6 +16,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.exceptions import LockError, RedisError
 
 
+_OBSOLETE_SESSION_FIELDS = (
+    "route_task",
+    "route_confidence",
+    "route_locked",
+    "conversation_status",
+    "handoff_reason",
+    "handoff_id",
+)
+
+
 class SessionStoreError(RuntimeError):
     """会话存储不可用或读写失败。"""
 
@@ -28,16 +38,10 @@ class SessionBusyError(SessionStoreError):
 class Session:
     business: str | None = None
     plugin_state: str | None = None
-    route_task: str | None = None
-    route_confidence: float | None = None
-    route_locked: bool = False
     call_info: dict[str, str] = field(default_factory=dict)
     context: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
     unrecognized_count: int = 0
-    conversation_status: str = "BOT"
-    handoff_reason: str | None = None
-    handoff_id: str | None = None
 
 
 class SessionStore(Protocol):
@@ -51,18 +55,12 @@ class SessionStore(Protocol):
         *,
         business: str,
         plugin_state: str | None = None,
-        route_task: str | None = None,
-        route_confidence: float | None = None,
-        route_locked: bool = False,
         call_info: dict[str, str],
         context: dict[str, Any],
         user_message: str,
         assistant_message: str,
         tenant_id: int = 1002,
         unrecognized_count: int = 0,
-        conversation_status: str = "BOT",
-        handoff_reason: str | None = None,
-        handoff_id: str | None = None,
     ) -> None: ...
 
     def lock(self, session_id: str, *, tenant_id: int = 1002) -> ContextManager[None]: ...
@@ -100,18 +98,12 @@ class MemorySessionStore:
         *,
         business: str,
         plugin_state: str | None = None,
-        route_task: str | None = None,
-        route_confidence: float | None = None,
-        route_locked: bool = False,
         call_info: dict[str, str],
         context: dict[str, Any],
         user_message: str,
         assistant_message: str,
         tenant_id: int = 1002,
         unrecognized_count: int = 0,
-        conversation_status: str = "BOT",
-        handoff_reason: str | None = None,
-        handoff_id: str | None = None,
     ) -> None:
         key = self._key(session_id, tenant_id)
         with self._guard:
@@ -120,18 +112,12 @@ class MemorySessionStore:
                 session,
                 business=business,
                 plugin_state=plugin_state,
-                route_task=route_task,
-                route_confidence=route_confidence,
-                route_locked=route_locked,
                 call_info=call_info,
                 context=context,
                 user_message=user_message,
                 assistant_message=assistant_message,
                 max_history=self._max_history,
                 unrecognized_count=unrecognized_count,
-                conversation_status=conversation_status,
-                handoff_reason=handoff_reason,
-                handoff_id=handoff_id,
             )
 
     @contextmanager
@@ -189,20 +175,10 @@ class RedisSessionStore:
             return Session(
                 business=raw.get("business") or None,
                 plugin_state=raw.get("plugin_state") or None,
-                route_task=raw.get("route_task") or None,
-                route_confidence=(
-                    float(raw["route_confidence"])
-                    if raw.get("route_confidence")
-                    else None
-                ),
-                route_locked=raw.get("route_locked") == "1",
                 call_info=_json_object(raw.get("call_info")),
                 context=_json_object(raw.get("context")),
                 history=_json_history(raw.get("history")),
                 unrecognized_count=int(raw.get("unrecognized_count", "0")),
-                conversation_status=raw.get("conversation_status") or "BOT",
-                handoff_reason=raw.get("handoff_reason") or None,
-                handoff_id=raw.get("handoff_id") or None,
             )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise SessionStoreError("Redis 会话数据格式错误") from exc
@@ -219,60 +195,40 @@ class RedisSessionStore:
         *,
         business: str,
         plugin_state: str | None = None,
-        route_task: str | None = None,
-        route_confidence: float | None = None,
-        route_locked: bool = False,
         call_info: dict[str, str],
         context: dict[str, Any],
         user_message: str,
         assistant_message: str,
         tenant_id: int = 1002,
         unrecognized_count: int = 0,
-        conversation_status: str = "BOT",
-        handoff_reason: str | None = None,
-        handoff_id: str | None = None,
     ) -> None:
         session = self.get(session_id, tenant_id=tenant_id)
         _update_session(
             session,
             business=business,
             plugin_state=plugin_state,
-            route_task=route_task,
-            route_confidence=route_confidence,
-            route_locked=route_locked,
             call_info=call_info,
             context=context,
             user_message=user_message,
             assistant_message=assistant_message,
             max_history=self._max_history,
             unrecognized_count=unrecognized_count,
-            conversation_status=conversation_status,
-            handoff_reason=handoff_reason,
-            handoff_id=handoff_id,
         )
         values = asdict(session)
         mapping = {
             "business": values["business"] or "",
             "plugin_state": values["plugin_state"] or "",
-            "route_task": values["route_task"] or "",
-            "route_confidence": (
-                str(values["route_confidence"])
-                if values["route_confidence"] is not None
-                else ""
-            ),
-            "route_locked": "1" if values["route_locked"] else "0",
             "call_info": json.dumps(values["call_info"], ensure_ascii=False),
             "context": json.dumps(values["context"], ensure_ascii=False),
             "history": json.dumps(values["history"], ensure_ascii=False),
             "unrecognized_count": str(values["unrecognized_count"]),
-            "conversation_status": values["conversation_status"],
-            "handoff_reason": values["handoff_reason"] or "",
-            "handoff_id": values["handoff_id"] or "",
             "updated_at": str(int(time())),
         }
         key = self._key(session_id, tenant_id)
         try:
             with self._client.pipeline(transaction=True) as pipe:
+                # 兼容升级前的 Redis Hash；新会话结构不再保留这些历史字段。
+                pipe.hdel(key, *_OBSOLETE_SESSION_FIELDS)
                 pipe.hset(key, mapping=mapping)
                 pipe.expire(key, self._ttl_seconds)
                 pipe.execute()
@@ -330,7 +286,7 @@ class SessionSettings(BaseSettings):
     session_max_history: int = Field(default=20, ge=2)
 
 
-def build_session_store(settings: SessionSettings | None = None) -> SessionStore:
+def build_session_store(settings: SessionSettings | None = None) -> MemorySessionStore | RedisSessionStore:
     settings = settings or SessionSettings()
     if settings.session_store_backend == "memory":
         return MemorySessionStore(max_history=settings.session_max_history)
@@ -349,30 +305,18 @@ def _update_session(
     *,
     business: str,
     plugin_state: str | None,
-    route_task: str | None,
-    route_confidence: float | None,
-    route_locked: bool,
     call_info: dict[str, str],
     context: dict[str, Any],
     user_message: str,
     assistant_message: str,
     max_history: int,
     unrecognized_count: int,
-    conversation_status: str,
-    handoff_reason: str | None,
-    handoff_id: str | None,
 ) -> None:
     session.business = business
     session.plugin_state = plugin_state
-    session.route_task = route_task
-    session.route_confidence = route_confidence
-    session.route_locked = route_locked
     session.call_info = deepcopy(call_info)
     session.context = deepcopy(context)
     session.unrecognized_count = unrecognized_count
-    session.conversation_status = conversation_status
-    session.handoff_reason = handoff_reason
-    session.handoff_id = handoff_id
     session.history.extend(
         [
             {"role": "user", "content": user_message},

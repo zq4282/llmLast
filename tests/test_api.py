@@ -128,7 +128,6 @@ def test_api_clears_session_after_handoff(monkeypatch) -> None:
         assert third_unknown.json()["out"] == "HUMAN"
         assert third_unknown.json()["data"] == {
             "unrecognized_count": 3,
-            "conversation_status": "HANDOFF_PENDING",
             "handoff_reason": "CONSECUTIVE_UNRECOGNIZED",
         }
 
@@ -138,7 +137,6 @@ def test_api_clears_session_after_handoff(monkeypatch) -> None:
         assert stored.context == {}
         assert stored.history == []
         assert stored.unrecognized_count == 0
-        assert stored.conversation_status == "BOT"
         assert len(model.calls) == 5
 
 

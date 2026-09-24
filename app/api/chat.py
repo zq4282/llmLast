@@ -54,14 +54,8 @@ def _chat_locked(request: ChatRequest, session_id: str) -> ChatResponse:
                 "config": request.config.model_dump(),
                 "business": session.business,
                 "plugin_state": session.plugin_state,
-                "route_task": session.route_task,
-                "route_confidence": session.route_confidence,
-                "route_locked": session.route_locked,
                 "context": session.context,
                 "unrecognized_count": session.unrecognized_count,
-                "conversation_status": session.conversation_status,
-                "handoff_reason": session.handoff_reason,
-                "handoff_id": session.handoff_id,
             }
         )
     except LLMAPIError as exc:
@@ -81,18 +75,12 @@ def _chat_locked(request: ChatRequest, session_id: str) -> ChatResponse:
             session_id,
             business=result["business"],
             plugin_state=result.get("plugin_state"),
-            route_task=result.get("route_task"),
-            route_confidence=result.get("route_confidence"),
-            route_locked=result.get("route_locked", False),
             call_info=result.get("call_info", call_info),
             context=result.get("context", {}),
             user_message=request.current_user_text,
             assistant_message=reply_text,
             tenant_id=request.tenant_id,
             unrecognized_count=result.get("unrecognized_count", 0),
-            conversation_status=result.get("conversation_status", "BOT"),
-            handoff_reason=result.get("handoff_reason"),
-            handoff_id=result.get("handoff_id"),
         )
     data = {
         key: value
@@ -103,7 +91,6 @@ def _chat_locked(request: ChatRequest, session_id: str) -> ChatResponse:
         data.update(
             {
                 "unrecognized_count": result.get("unrecognized_count", 0),
-                "conversation_status": result.get("conversation_status", "HANDOFF_PENDING"),
                 "handoff_reason": result.get("handoff_reason"),
             }
         )

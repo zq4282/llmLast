@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.engine.outputs import DialogueOutput
+from app.engine.state import ReplySource
 
 SYSTEM_FALLBACKS = {
     "unknown_first": "抱歉，我没太听明白。您可以换一种说法，或补充一下具体需要办理什么。",
@@ -68,7 +69,6 @@ def recovery_decision(
             out=DialogueOutput.HUMAN,
             plugin_state=plugin_state,
             count=0,
-            status="HANDOFF_PENDING",
             reason="USER_REQUESTED",
         )
 
@@ -91,7 +91,6 @@ def recovery_decision(
         out=step.out,
         plugin_state=plugin_state,
         count=count,
-        status="HANDOFF_PENDING" if is_handoff else "BOT",
         reason=(
             (
                 "CONSECUTIVE_UNRECOGNIZED"
@@ -110,7 +109,6 @@ def _decision(
     out: DialogueOutput,
     plugin_state: str | None,
     count: int,
-    status: str,
     reason: str | None,
 ) -> dict[str, Any]:
     return {
@@ -118,9 +116,7 @@ def _decision(
         "reply_key": reply_key,
         "next_plugin_state": plugin_state,
         "out": out,
-        "use_fallback": True,
-        "use_system_fallback": True,
+        "reply_source": ReplySource.SYSTEM_FALLBACK,
         "unrecognized_count": count,
-        "conversation_status": status,
         "handoff_reason": reason,
     }

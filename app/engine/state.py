@@ -1,5 +1,6 @@
 """LangGraph 在五个节点之间传递的状态。"""
 
+from enum import StrEnum
 from typing import Any, TypedDict
 
 from app.engine.action_result import ActionResult
@@ -12,6 +13,12 @@ class CallInfoState(TypedDict):
     caller: str
     callee: str
     call_start_time: str
+
+
+class ReplySource(StrEnum):
+    TEMPLATE = "template"
+    PLUGIN_FALLBACK = "plugin_fallback"
+    SYSTEM_FALLBACK = "system_fallback"
 
 
 class ChatState(TypedDict, total=False):
@@ -32,18 +39,9 @@ class ChatState(TypedDict, total=False):
     tenant_id: int
     # 【跨轮必需】通话元数据；所有图节点及业务 Handler 共享，随会话持久化。
     call_info: CallInfoState
-    # 【单轮可选】调用方传入的系统提示词及生成配置，供后续回复节点扩展使用。
-    system_prompt: str
-    config: dict[str, Any]
 
     # ===== 顶层路由（跨轮共享） =====
-    # 【必需】Router 模型的 Task 结果，例如 REFUND；用于复用路由。
-    route_task: str | None
-    # 【可选】Router 置信度，仅用于观测/审计，删除不影响流程。
-    route_confidence: float | None
-    # 【必需】True 表示已选定插件，后续轮次禁止再调用顶层 Router 模型。
-    route_locked: bool
-    # 【必需】已选中的插件名，例如 refund；后续轮次直接据此进入插件。
+    # 【必需】已选中的插件名，例如 refund；值不对应插件时下一轮重新路由。
     business: str
     # 【必需】插件内状态机位置，例如 IDLE/CONFIRM_REFUND/ASK_OTHER。
     plugin_state: str
@@ -51,18 +49,10 @@ class ChatState(TypedDict, total=False):
     # ===== 会话恢复控制（跨轮共享） =====
     # 连续未理解或当前插件无法处理的次数；匹配有效业务动作后立即清零。
     unrecognized_count: int
-    # BOT/HANDOFF_PENDING/ENDED；HUMAN 本轮返回后由 API 删除整个会话。
-    conversation_status: str
-    # 转人工原因，例如 USER_REQUESTED/CONSECUTIVE_UNRECOGNIZED/CONSECUTIVE_UNSUPPORTED。
-    handoff_reason: str | None
-    # 人工系统返回的接管标识，尚未对接时为空。
-    handoff_id: str | None
 
     # ===== 插件理解结果（单轮临时） =====
     # 【必需】understand 节点返回的插件内意图，decide 用它查动作表。
     intent: str
-    # 【可选】插件内意图置信度，仅用于观测，删除不影响流程。
-    intent_confidence: float
     # 【本轮需要】本轮模型新抽取的槽位；action handler 会按需与 context 合并。
     slots: dict[str, Any]
     # 【跨轮必需】已累积的槽位和 API 结果，例如 order_no/amount/merchant。
@@ -77,10 +67,10 @@ class ChatState(TypedDict, total=False):
     next_plugin_state: str
     # 【必需】actions.out，对外标识 CHAT/REFUND/HUMAN/END。
     out: DialogueOutput
-    # 【内部需要】区分 templates 和 fallbacks 话术来源。可通过拆分 reply_key 类型后移除。
-    use_fallback: bool
-    # 【单轮临时】True 表示使用引擎级恢复话术，不依赖具体业务插件。
-    use_system_fallback: bool
+    # 【单轮临时】转人工原因，仅随 HUMAN 响应返回，不持久化。
+    handoff_reason: str | None
+    # 【单轮临时】回复来自正常模板、插件兜底或系统兜底。
+    reply_source: ReplySource
     # 【单轮临时】Router 已直接产出 unknown/human 时跳过插件理解。
     skip_understanding: bool
 
@@ -89,5 +79,3 @@ class ChatState(TypedDict, total=False):
     action_result: ActionResult
     # 【最终输出】对用户的回复文本。
     reply: str
-    # 【可选】内部错误详情，用于日志/排查；不应直接返回给用户。
-    error: str | None

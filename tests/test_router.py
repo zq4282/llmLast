@@ -104,8 +104,8 @@ def test_router_reuses_locked_shared_state_without_calling_model(monkeypatch) ->
         plugins = {"refund": FakePlugin()}
 
         @staticmethod
-        def get_by_route_task(task: str) -> FakePlugin:
-            assert task == "REFUND"
+        def get(name: str) -> FakePlugin:
+            assert name == "refund"
             return FakePlugin()
 
     def fail_if_called(message: str, history: list[dict[str, str]]) -> RouteDecision:
@@ -118,13 +118,9 @@ def test_router_reuses_locked_shared_state_without_calling_model(monkeypatch) ->
         {
             "message": "A1001",
             "history": [],
-            "route_task": "REFUND",
-            "route_confidence": 0.96,
-            "route_locked": True,
+            "business": "refund",
         }
     )
 
     assert result["business"] == "refund"
-    assert result["route_task"] == "REFUND"
-    assert result["route_confidence"] == 0.96
-    assert result["route_locked"] is True
+    assert result["skip_understanding"] is False

@@ -21,12 +21,8 @@ def _next_turn(previous: dict, message: str) -> dict:
         "history": [],
         "business": previous["business"],
         "plugin_state": previous.get("plugin_state"),
-        "route_task": previous.get("route_task"),
-        "route_confidence": previous.get("route_confidence"),
-        "route_locked": previous.get("route_locked", False),
         "context": previous.get("context", {}),
         "unrecognized_count": previous.get("unrecognized_count", 0),
-        "conversation_status": previous.get("conversation_status", "BOT"),
         "handoff_reason": previous.get("handoff_reason"),
     }
 
@@ -40,7 +36,6 @@ def test_two_configured_recovery_steps_handoff_on_second_attempt() -> None:
         "intent": "unknown",
         "plugin_state": "CONFIRM_REFUND",
         "unrecognized_count": 0,
-        "conversation_status": "BOT",
     }
 
     first = recovery_decision(initial, steps=steps)
@@ -55,7 +50,6 @@ def test_two_configured_recovery_steps_handoff_on_second_attempt() -> None:
     assert second is not None
     assert second["reply_key"] == "unknown_handoff"
     assert second["out"] == "HUMAN"
-    assert second["conversation_status"] == "HANDOFF_PENDING"
 
 
 def test_three_unknown_turns_escalate_and_keep_business_state(monkeypatch) -> None:
@@ -70,12 +64,8 @@ def test_three_unknown_turns_escalate_and_keep_business_state(monkeypatch) -> No
     current = {
         "business": "refund",
         "plugin_state": "CONFIRM_REFUND",
-        "route_task": "REFUND",
-        "route_confidence": 0.97,
-        "route_locked": True,
         "context": {"order_no": "ORD202405010001", "amount": 299.0},
         "unrecognized_count": 0,
-        "conversation_status": "BOT",
     }
 
     first = run_graph(_next_turn(current, "adfadfadf"))
@@ -89,7 +79,6 @@ def test_three_unknown_turns_escalate_and_keep_business_state(monkeypatch) -> No
     assert "转人工" in second["reply"]
     assert third["unrecognized_count"] == 3
     assert third["out"] == "HUMAN"
-    assert third["conversation_status"] == "HANDOFF_PENDING"
     assert third["handoff_reason"] == "CONSECUTIVE_UNRECOGNIZED"
     assert third["plugin_state"] == "CONFIRM_REFUND"
     assert third["context"]["order_no"] == "ORD202405010001"
@@ -107,12 +96,8 @@ def test_recognized_intent_resets_unknown_count(monkeypatch) -> None:
     current = {
         "business": "refund",
         "plugin_state": "CONFIRM_REFUND",
-        "route_task": "REFUND",
-        "route_confidence": 0.97,
-        "route_locked": True,
         "context": {"order_no": "ORD202405010001", "amount": 299.0},
         "unrecognized_count": 0,
-        "conversation_status": "BOT",
     }
 
     first = run_graph(_next_turn(current, "听不清"))
@@ -136,12 +121,8 @@ def test_unknown_during_refund_confirmation_uses_contextual_replies(monkeypatch)
     current = {
         "business": "refund",
         "plugin_state": "CONFIRM_REFUND",
-        "route_task": "REFUND",
-        "route_confidence": 0.97,
-        "route_locked": True,
         "context": {"order_no": "ORD202405010001", "amount": 19.9},
         "unrecognized_count": 0,
-        "conversation_status": "BOT",
     }
 
     first = run_graph(_next_turn(current, "asdfasdf"))
@@ -167,12 +148,8 @@ def test_unsupported_intent_does_not_repeat_forever(monkeypatch) -> None:
     current = {
         "business": "refund",
         "plugin_state": "CONFIRM_REFUND",
-        "route_task": "REFUND",
-        "route_confidence": 0.97,
-        "route_locked": True,
         "context": {"order_no": "ORD202405010001", "amount": 19.9},
         "unrecognized_count": 0,
-        "conversation_status": "BOT",
     }
 
     first = run_graph(_next_turn(current, "asdfasdf"))
@@ -185,7 +162,6 @@ def test_unsupported_intent_does_not_repeat_forever(monkeypatch) -> None:
     assert first["reply"] != second["reply"]
     assert third["unrecognized_count"] == 3
     assert third["out"] == "HUMAN"
-    assert third["conversation_status"] == "HANDOFF_PENDING"
     assert third["handoff_reason"] == "CONSECUTIVE_UNSUPPORTED"
 
 
@@ -200,11 +176,8 @@ def test_router_unknown_uses_recovery_without_loading_plugin(monkeypatch) -> Non
             "history": [],
             "business": None,
             "plugin_state": None,
-            "route_task": None,
-            "route_locked": False,
             "context": {},
             "unrecognized_count": 0,
-            "conversation_status": "BOT",
         }
     )
 
@@ -225,15 +198,11 @@ def test_router_human_request_transfers_immediately(monkeypatch) -> None:
             "history": [],
             "business": None,
             "plugin_state": None,
-            "route_task": None,
-            "route_locked": False,
             "context": {},
             "unrecognized_count": 0,
-            "conversation_status": "BOT",
         }
     )
 
     assert result["out"] == "HUMAN"
-    assert result["conversation_status"] == "HANDOFF_PENDING"
     assert result["handoff_reason"] == "USER_REQUESTED"
     assert result["unrecognized_count"] == 0
