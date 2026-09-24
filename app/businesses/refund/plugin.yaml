@@ -86,8 +86,8 @@ prompt: |
   当前状态：ASK_ORDER_INFO
   最近对话：
   系统：暂未查到可退款订单，请提供下单手机号或订单号。
-  用户：手机号是 17600184282
-  输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"17600184282","order_no":null}}
+  用户：手机号是 15838996373
+  输出：{"intent":"provide_info","confidence":0.98,"slots":{"backup_phone":"15838996373","order_no":null}}
 
 actions:
   - state: IDLE

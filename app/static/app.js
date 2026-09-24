@@ -9,6 +9,8 @@ const elements = {
   empty: document.querySelector("#empty-state"),
   turnCount: document.querySelector("#turn-count"),
   session: document.querySelector("#session-id"),
+  caller: document.querySelector("#caller"),
+  callee: document.querySelector("#callee"),
   newSession: document.querySelector("#new-session"),
   responseSession: document.querySelector("#response-session-value"),
   business: document.querySelector("#business-value"),
@@ -16,6 +18,7 @@ const elements = {
   action: document.querySelector("#action-value"),
   latency: document.querySelector("#latency"),
   responseJson: document.querySelector("#response-json"),
+  requestJson: document.querySelector("#request-json"),
   copy: document.querySelector("#copy-response"),
   commandTrigger: document.querySelector("#command-trigger"),
   commandDialog: document.querySelector("#command-dialog"),
@@ -28,16 +31,39 @@ const state = {
   response: null,
   commandIndex: 0,
   loading: false,
+  history: [],
+  callStartTime: "",
+};
+
+const DEFAULTS = {
+  tenantId: 1002,
+  systemPrompt: "你是会员业务客服，请识别用户意图并生成回复话术",
+  config: { maxReplyLen: 60, temperature: 0.1 },
 };
 
 const createSessionId = () => {
-  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  if (window.crypto?.randomUUID) {
+    return `CALL_${window.crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
+  }
   const randomPart = Math.random().toString(36).slice(2, 10);
-  return `session-${Date.now().toString(36)}-${randomPart}`;
+  return `CALL_${Date.now().toString(36).toUpperCase()}_${randomPart.toUpperCase()}`;
 };
 
-// 每次打开页面都生成一个独立的随机会话，避免误用上次上下文。
-elements.session.value = createSessionId();
+function formatDateTime(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
+
+state.callStartTime = formatDateTime();
 
 function setSending(isSending) {
   state.loading = isSending;
@@ -102,12 +128,27 @@ async function sendMessage(message) {
   state.turns += 1;
   elements.turnCount.textContent = `${state.turns} 轮请求`;
   const startedAt = performance.now();
+  const requestTime = formatDateTime();
+  const requestPayload = {
+    sessionId,
+    tenantId: DEFAULTS.tenantId,
+    callInfo: {
+      caller: elements.caller.value.trim(),
+      callee: elements.callee.value.trim(),
+      callStartTime: state.callStartTime,
+    },
+    systemPrompt: DEFAULTS.systemPrompt,
+    historyContext: state.history,
+    currentUserText: message,
+    config: DEFAULTS.config,
+  };
+  elements.requestJson.textContent = JSON.stringify(requestPayload, null, 2);
 
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, message }),
+      body: JSON.stringify(requestPayload),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -116,6 +157,12 @@ async function sendMessage(message) {
     }
     const elapsed = performance.now() - startedAt;
     addMessage("assistant", payload.reply, `${payload.business} · ${payload.intent}`);
+    state.history.push({
+      round: state.turns,
+      userText: message,
+      aiText: payload.reply,
+      time: requestTime,
+    });
     updateInspector(payload, elapsed);
     elements.input.value = "";
     elements.count.textContent = "0 / 4000";
@@ -140,6 +187,11 @@ elements.form.addEventListener("submit", (event) => {
     elements.input.focus();
     return;
   }
+  if (!elements.caller.value.trim() || !elements.callee.value.trim()) {
+    setInputError("请先填写主叫号码和被叫号码。");
+    (!elements.caller.value.trim() ? elements.caller : elements.callee).focus();
+    return;
+  }
   setInputError("");
   void sendMessage(message);
 });
@@ -156,10 +208,19 @@ elements.input.addEventListener("keydown", (event) => {
   }
 });
 
+elements.session.addEventListener("change", () => {
+  state.turns = 0;
+  state.history = [];
+  state.callStartTime = formatDateTime();
+  elements.turnCount.textContent = "尚未发送消息";
+});
+
 elements.newSession.addEventListener("click", () => {
   elements.session.value = createSessionId();
   state.turns = 0;
   state.response = null;
+  state.history = [];
+  state.callStartTime = formatDateTime();
   elements.messages.replaceChildren();
   const empty = document.createElement("div");
   empty.className = "empty-state";
@@ -181,6 +242,7 @@ elements.newSession.addEventListener("click", () => {
   elements.responseSession.textContent = "—";
   elements.latency.textContent = "— ms";
   elements.responseJson.textContent = JSON.stringify({ status: "waiting" }, null, 2);
+  elements.requestJson.textContent = JSON.stringify({ status: "waiting" }, null, 2);
   elements.copy.disabled = true;
   elements.input.focus();
 });

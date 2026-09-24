@@ -27,12 +27,24 @@ uv run python run.py
 ```bash
 curl -X POST http://127.0.0.1:8000/api/chat \
   -H 'Content-Type: application/json' \
-  -d '{"session_id":"demo-1","message":"我要退款"}'
-
-curl -X POST http://127.0.0.1:8000/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"session_id":"demo-1","message":"订单号 ORD202405010001，因为买错了"}'
+  -d '{
+    "sessionId": "CALL_001",
+    "tenantId": 1002,
+    "callInfo": {
+      "caller": "13800138000",
+      "callee": "10000",
+      "callStartTime": "2026-09-22 10:00:00"
+    },
+    "systemPrompt": "你是会员业务客服，请识别用户意图并生成回复话术",
+    "historyContext": [],
+    "currentUserText": "我要退款",
+    "config": {"maxReplyLen": 60, "temperature": 0.1}
+  }'
 ```
+
+除 `currentUserText` 外均提供默认值；前端测试台会自动生成呼叫时间与历史上下文。
+`callInfo` 在后端作为独立的跨轮共享状态保存，图节点和业务 Handler 可通过
+`state["call_info"]` 读取；它不会混入业务槽位 `context`。
 
 不配置 LLM Key 时会使用内置规则进行路由和意图识别，便于本地开发及测试。
 如需接入 DeepSeek 或其他 OpenAI 兼容接口，在 `.env` 中填写 `LLM_API_KEY`、

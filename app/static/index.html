@@ -33,16 +33,26 @@
           <h1>验证每一轮对话。</h1>
           <p>发送真实请求，同时检查业务路由、意图、动作和返回数据。</p>
         </div>
-        <div class="session-control">
-          <label for="session-id">会话 ID</label>
-          <div class="session-control__row">
-            <input id="session-id" name="session-id" type="text" autocomplete="off" spellcheck="false" aria-describedby="session-help">
-            <button class="session-random-button" id="new-session" type="button" aria-label="生成随机会话 ID" title="生成随机会话 ID">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"/></svg>
-              <span>随机会话</span>
-            </button>
+        <div class="call-fields" aria-label="通话信息">
+          <div class="call-field call-field--session">
+            <label for="session-id">会话 ID</label>
+            <div class="session-control__row">
+              <input id="session-id" name="session-id" type="text" maxlength="128" autocomplete="off" spellcheck="false" aria-describedby="session-help" value="CALL_001">
+              <button class="session-random-button" id="new-session" type="button" aria-label="生成新会话 ID" title="生成新会话 ID">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"/></svg>
+                <span>新会话</span>
+              </button>
+            </div>
           </div>
-          <p id="session-help">同一个 ID 会保留多轮上下文；点击“随机会话”可开始新会话。</p>
+          <div class="call-field">
+            <label for="caller">主叫号码</label>
+            <input id="caller" name="caller" type="tel" maxlength="32" autocomplete="tel" value="13800138000" required>
+          </div>
+          <div class="call-field">
+            <label for="callee">被叫号码</label>
+            <input id="callee" name="callee" type="tel" maxlength="32" inputmode="tel" value="10000" required>
+          </div>
+          <p id="session-help">租户、呼叫时间、系统提示词和模型参数使用默认值。</p>
         </div>
       </section>
 
@@ -96,6 +106,15 @@
             <div><dt>动作</dt><dd id="action-value">—</dd></div>
             <div><dt>会话</dt><dd id="response-session-value">—</dd></div>
           </dl>
+
+          <div class="response-block request-block">
+            <div class="response-block__head">
+              <span>REQUEST.JSON</span>
+            </div>
+            <pre id="request-json" tabindex="0">{
+  "status": "waiting"
+}</pre>
+          </div>
 
           <div class="response-block">
             <div class="response-block__head">

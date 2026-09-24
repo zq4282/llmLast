@@ -5,6 +5,14 @@ from typing import Any, TypedDict
 from app.engine.action_result import ActionResult
 
 
+class CallInfoState(TypedDict):
+    """一次通话的共享元数据，字段名统一使用后端 snake_case。"""
+
+    caller: str
+    callee: str
+    call_start_time: str
+
+
 class ChatState(TypedDict, total=False):
     """统一图状态。
 
@@ -19,6 +27,13 @@ class ChatState(TypedDict, total=False):
     message: str
     # 【跨轮必需】最近对话，Router 和插件 prompt 都可能用到。
     history: list[dict[str, str]]
+    # 【单轮必需】租户标识；业务 Handler 可直接从 state 读取。
+    tenant_id: int
+    # 【跨轮必需】通话元数据；所有图节点及业务 Handler 共享，随会话持久化。
+    call_info: CallInfoState
+    # 【单轮可选】调用方传入的系统提示词及生成配置，供后续回复节点扩展使用。
+    system_prompt: str
+    config: dict[str, Any]
 
     # ===== 顶层路由（跨轮共享） =====
     # 【必需】Router 模型的 Task 结果，例如 REFUND；用于复用路由。

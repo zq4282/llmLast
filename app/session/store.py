@@ -13,6 +13,7 @@ class Session:
     route_task: str | None = None
     route_confidence: float | None = None
     route_locked: bool = False
+    call_info: dict[str, str] = field(default_factory=dict)
     context: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
 
@@ -36,6 +37,7 @@ class MemorySessionStore:
         route_task: str | None = None,
         route_confidence: float | None = None,
         route_locked: bool = False,
+        call_info: dict[str, str],
         context: dict[str, Any],
         user_message: str,
         assistant_message: str,
@@ -47,6 +49,7 @@ class MemorySessionStore:
             session.route_task = route_task
             session.route_confidence = route_confidence
             session.route_locked = route_locked
+            session.call_info = deepcopy(call_info)
             session.context = deepcopy(context)
             session.history.extend(
                 [

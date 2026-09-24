@@ -33,8 +33,17 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         first = client.post(
             "/api/chat",
             json={
-                "session_id": "api-test",
-                "message": "订单号 ORD202405010001，赶紧退过来",
+                "sessionId": "api-test",
+                "tenantId": 1002,
+                "callInfo": {
+                    "caller": "13800138000",
+                    "callee": "10000",
+                    "callStartTime": "2026-09-22 10:00:00",
+                },
+                "systemPrompt": "你是会员业务客服，请识别用户意图并生成回复话术",
+                "historyContext": [],
+                "currentUserText": "订单号 ORD202405010001，赶紧退过来",
+                "config": {"maxReplyLen": 60, "temperature": 0.1},
             },
         )
         assert first.status_code == 200
@@ -42,8 +51,15 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         assert first.json()["intent"] == "refund_request"
         assert first.json()["out"] == "CHAT"
         assert "是否需要为您申请退款" in first.json()["reply"]
+        stored_after_first = session_store.get("api-test")
+        assert stored_after_first.call_info == {
+            "caller": "13800138000",
+            "callee": "10000",
+            "call_start_time": "2026-09-22 10:00:00",
+        }
+        assert "caller" not in stored_after_first.context
 
-        second = client.post("/api/chat", json={"session_id": "api-test", "message": "就是那笔"})
+        second = client.post("/api/chat", json={"sessionId": "api-test", "currentUserText": "就是那笔"})
         assert second.status_code == 200
         body = second.json()
         assert body["business"] == "refund"
@@ -51,9 +67,10 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
         assert body["action"] == "submit_refund"
         assert body["out"] == "REFUND"
         assert body["data"]["order_no"] == "ORD202405010001"
-        end_response = client.post("/api/chat", json={"session_id": "api-test", "message": "没有了"})
+        end_response = client.post("/api/chat", json={"sessionId": "api-test", "currentUserText": "没有了"})
         assert end_response.status_code == 200
         assert end_response.json()["out"] == "END"
+        assert session_store.get("api-test").call_info == stored_after_first.call_info
 
         assert len(model.calls) == 4
         assert sum(call[0]["role"] == "system" for call in model.calls) == 1
@@ -61,8 +78,25 @@ def test_chat_api_and_session_follow_up(monkeypatch) -> None:
 
 def test_blank_message_is_rejected() -> None:
     with TestClient(app) as client:
-        response = client.post("/api/chat", json={"message": "   "})
+        response = client.post("/api/chat", json={"currentUserText": "   "})
     assert response.status_code == 422
+
+
+def test_openapi_uses_new_camel_case_request_fields() -> None:
+    with TestClient(app) as client:
+        schema = client.get("/openapi.json").json()
+
+    request_schema = schema["components"]["schemas"]["ChatRequest"]
+    assert request_schema["required"] == ["currentUserText"]
+    assert set(request_schema["properties"]) == {
+        "sessionId",
+        "tenantId",
+        "callInfo",
+        "systemPrompt",
+        "historyContext",
+        "currentUserText",
+        "config",
+    }
 
 
 def test_frontend_is_served() -> None:
@@ -74,11 +108,12 @@ def test_frontend_is_served() -> None:
 
     assert page.status_code == 200
     assert "对话引擎测试台" in page.text
-    assert "随机会话" in page.text
+    assert "主叫号码" in page.text
     assert stylesheet.status_code == 200
     assert "macrostructure: Workbench" in stylesheet.text
     assert script.status_code == 200
     assert 'fetch("/api/chat"' in script.text
+    assert "currentUserText" in script.text
     assert "crypto?.randomUUID" in script.text
     assert tokens.status_code == 200
     assert "--color-accent" in tokens.text

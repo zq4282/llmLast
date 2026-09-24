@@ -207,11 +207,19 @@ kbd {
   color: var(--color-muted);
 }
 
-.session-control {
+.call-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.55fr);
+  gap: var(--space-sm);
   min-width: 0;
 }
 
-.session-control label,
+.call-field--session,
+.call-fields > p {
+  grid-column: 1 / -1;
+}
+
+.call-fields label,
 .composer > label {
   display: block;
   margin-block-end: var(--space-xs);
@@ -226,7 +234,7 @@ kbd {
   gap: var(--space-xs);
 }
 
-.session-control input,
+.call-fields input,
 .composer textarea,
 .command-search input {
   width: 100%;
@@ -235,7 +243,7 @@ kbd {
   outline-offset: 1px;
 }
 
-.session-control input {
+.call-fields input {
   min-width: 0;
   min-height: 44px;
   padding-inline: var(--space-sm);
@@ -246,7 +254,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-.session-control p {
+.call-fields p {
   min-height: 1lh;
   margin: var(--space-2xs) 0 0;
   font-size: var(--text-sm);
@@ -634,6 +642,11 @@ kbd {
   overflow-wrap: anywhere;
 }
 
+.request-block pre {
+  min-height: 10rem;
+  max-height: 18rem;
+}
+
 .trace-note {
   margin: 0 var(--space-md) var(--space-lg);
   padding-block-start: var(--space-md);
@@ -801,7 +814,7 @@ kbd {
 
 @media (hover: hover) and (pointer: fine) {
   .command-trigger:hover,
-  .session-control input:hover,
+  .call-fields input:hover,
   .composer textarea:hover {
     background: var(--color-paper-3);
   }
@@ -832,7 +845,7 @@ kbd {
   transform: translateY(1px);
 }
 
-.session-control input:focus-visible,
+.call-fields input:focus-visible,
 .composer textarea:focus-visible {
   border-color: var(--color-ink-2);
   outline-color: var(--color-focus);
@@ -857,7 +870,7 @@ kbd {
   }
 
   .intro {
-    grid-template-columns: minmax(0, 1.35fr) minmax(18rem, 0.65fr);
+    grid-template-columns: minmax(0, 1fr) minmax(26rem, 1fr);
   }
 
   .composer {
