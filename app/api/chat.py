@@ -5,9 +5,10 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from app.engine.graph import run_graph
+from app.engine.outputs import DialogueOutput
 from app.integrations.llm_api import LLMAPIError
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.session.store import session_store
+from app.session.store import SessionBusyError, SessionStoreError, session_store
 
 
 router = APIRouter(tags=["chat"])
@@ -17,7 +18,20 @@ logger = logging.getLogger(__name__)
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
     session_id = request.resolved_session_id()
-    session = session_store.get(session_id)
+    try:
+        with session_store.lock(session_id, tenant_id=request.tenant_id):
+            return _chat_locked(request, session_id)
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionStoreError as exc:
+        logger.exception("会话存储失败: %s", exc)
+        raise HTTPException(status_code=503, detail="会话存储暂时不可用") from exc
+
+
+def _chat_locked(request: ChatRequest, session_id: str) -> ChatResponse:
+    """在同一会话的分布式锁内完成一次完整的读取、决策和保存。"""
+
+    session = session_store.get(session_id, tenant_id=request.tenant_id)
     request_history = request.engine_history()
     history = request_history or session.history
     # callInfo 是独立的跨轮共享状态，不与业务槽位 context 混存。
@@ -44,6 +58,10 @@ def chat(request: ChatRequest) -> ChatResponse:
                 "route_confidence": session.route_confidence,
                 "route_locked": session.route_locked,
                 "context": session.context,
+                "unrecognized_count": session.unrecognized_count,
+                "conversation_status": session.conversation_status,
+                "handoff_reason": session.handoff_reason,
+                "handoff_id": session.handoff_id,
             }
         )
     except LLMAPIError as exc:
@@ -65,18 +83,31 @@ def chat(request: ChatRequest) -> ChatResponse:
         context=result.get("context", {}),
         user_message=request.current_user_text,
         assistant_message=reply_text,
+        tenant_id=request.tenant_id,
+        unrecognized_count=result.get("unrecognized_count", 0),
+        conversation_status=result.get("conversation_status", "BOT"),
+        handoff_reason=result.get("handoff_reason"),
+        handoff_id=result.get("handoff_id"),
     )
     data = {
         key: value
         for key, value in result.get("action_result", {}).items()
         if key not in {"ok", "error"}
     }
+    if result.get("out") == DialogueOutput.HUMAN:
+        data.update(
+            {
+                "unrecognized_count": result.get("unrecognized_count", 0),
+                "conversation_status": result.get("conversation_status", "HANDOFF_PENDING"),
+                "handoff_reason": result.get("handoff_reason"),
+            }
+        )
     return ChatResponse(
         session_id=session_id,
         reply=reply_text,
         business=result["business"],
         intent=result["intent"],
         action=result.get("action"),
-        out=result.get("out", "CHAT"),
+        out=result.get("out", DialogueOutput.CHAT),
         data=data,
     )

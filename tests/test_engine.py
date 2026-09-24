@@ -1,9 +1,31 @@
+from pathlib import Path
+
+import pytest
+
 from app.engine.graph import reply
-from app.engine.loader import plugin_loader
+from app.engine.loader import PluginConfigError, PluginLoader, plugin_loader
+from app.engine.outputs import ALLOWED_OUTPUTS
 
 
 def test_all_plugins_are_loaded() -> None:
     assert set(plugin_loader.load_all(force=True)) == {"refund"}
+
+
+def test_external_outputs_are_limited_to_four_values() -> None:
+    assert ALLOWED_OUTPUTS == {"CHAT", "REFUND", "HUMAN", "END"}
+
+
+def test_plugin_rejects_unknown_output(tmp_path: Path) -> None:
+    source = Path("app/businesses/refund/plugin.yaml").read_text(encoding="utf-8")
+    invalid_plugin = tmp_path / "refund" / "plugin.yaml"
+    invalid_plugin.parent.mkdir()
+    invalid_plugin.write_text(
+        source.replace("out: CHAT", "out: OTHER", 1),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PluginConfigError, match="out 必须是"):
+        PluginLoader(tmp_path).load_all()
 
 
 def test_refund_plugin_keeps_reserved_states_and_action_table() -> None:

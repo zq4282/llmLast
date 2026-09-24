@@ -3,6 +3,7 @@
 from typing import Any, TypedDict
 
 from app.engine.action_result import ActionResult
+from app.engine.outputs import DialogueOutput
 
 
 class CallInfoState(TypedDict):
@@ -47,6 +48,16 @@ class ChatState(TypedDict, total=False):
     # 【必需】插件内状态机位置，例如 IDLE/CONFIRM_REFUND/ASK_OTHER。
     plugin_state: str
 
+    # ===== 会话恢复控制（跨轮共享） =====
+    # 连续语义未理解次数；识别出有效意图后立即清零。
+    unrecognized_count: int
+    # BOT/HANDOFF_PENDING/HUMAN/ENDED；人工接管后禁止再次进入机器人流程。
+    conversation_status: str
+    # 转人工原因，例如 USER_REQUESTED/CONSECUTIVE_UNRECOGNIZED。
+    handoff_reason: str | None
+    # 人工系统返回的接管标识，尚未对接时为空。
+    handoff_id: str | None
+
     # ===== 插件理解结果（单轮临时） =====
     # 【必需】understand 节点返回的插件内意图，decide 用它查动作表。
     intent: str
@@ -65,9 +76,13 @@ class ChatState(TypedDict, total=False):
     # 【必需】actions.next；成功后写回 plugin_state，失败时可由 on_error 覆盖。
     next_plugin_state: str
     # 【必需】actions.out，对外标识 CHAT/REFUND/HUMAN/END。
-    out: str
+    out: DialogueOutput
     # 【内部需要】区分 templates 和 fallbacks 话术来源。可通过拆分 reply_key 类型后移除。
     use_fallback: bool
+    # 【单轮临时】True 表示使用引擎级恢复话术，不依赖具体业务插件。
+    use_system_fallback: bool
+    # 【单轮临时】Router 已直接产出 unknown/human 时跳过插件理解。
+    skip_understanding: bool
 
     # ===== 执行与回复（单轮临时/最终输出） =====
     # 【本轮需要】run_action 调用业务 API 后的结果，reply 用于填充话术和更新 context。

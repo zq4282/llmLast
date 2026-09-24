@@ -14,8 +14,11 @@ router → understand → decide → run_action → reply
 
 ```bash
 uv sync
+redis-server
 uv run python run.py
 ```
+
+可以将 `.env.example` 复制为 `.env` 后修改 Redis 和 LLM 配置。
 
 接口文档：<http://127.0.0.1:8000/docs>
 
@@ -57,5 +60,30 @@ uv run pytest
 ```
 
 `app/integrations/` 当前提供确定性的本地模拟实现。生产环境可保持函数契约不变，
-替换为订单、退款、账户、短信和 LLM 的真实 HTTP/SDK 调用；会话存储也可按
-`MemorySessionStore` 接口替换为 Redis。
+替换为订单、退款、账户、短信和 LLM 的真实 HTTP/SDK 调用。
+
+## Redis 会话状态
+
+生产环境默认使用 Redis 保存跨轮会话状态，并按 `tenantId + sessionId` 隔离数据。
+同一个会话的一整轮处理由 Redis 分布式锁串行化，状态每次写入后刷新 TTL。
+
+```bash
+REDIS_URL=redis://127.0.0.1:6379/0
+SESSION_KEY_PREFIX=llmlast
+SESSION_TTL_SECONDS=86400
+SESSION_LOCK_TIMEOUT_SECONDS=30
+SESSION_LOCK_BLOCKING_TIMEOUT_SECONDS=5
+```
+
+Redis 不可用时应用启动失败或聊天接口返回 503，不会静默降级到进程内存。
+只有测试环境应设置 `SESSION_STORE_BACKEND=memory`。
+
+## 连续未理解恢复
+
+接口 `out` 固定为 `CHAT`、`REFUND`、`HUMAN`、`END` 四种，不接受其他值。
+其中主动要求人工和连续三次未理解都返回 `HUMAN`。
+
+模型连续返回 `unknown` 时，引擎会保存跨轮计数并保持当前业务状态：第一次请用户
+补充，第二次提示可转人工并预告升级，第三次返回 `out=HUMAN`，将会话标记为
+`HANDOFF_PENDING`。转人工后的请求不会再次调用模型或执行业务动作。任意有效意图
+都会将连续未理解次数清零；业务接口异常和已识别但未配置的意图不会增加该次数。

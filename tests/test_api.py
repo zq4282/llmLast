@@ -82,6 +82,65 @@ def test_blank_message_is_rejected() -> None:
     assert response.status_code == 422
 
 
+def test_api_persists_unknown_count_and_stops_after_handoff(monkeypatch) -> None:
+    model = SequenceClient(
+        [
+            '{"task":"REFUND","confidence":0.97}',
+            '{"intent":"refund_request","confidence":0.93,'
+            '"slots":{"backup_phone":null,"order_no":"ORD202405010001"}}',
+            '{"intent":"unknown","confidence":0.20,"slots":{}}',
+            '{"intent":"unknown","confidence":0.16,"slots":{}}',
+            '{"intent":"unknown","confidence":0.11,"slots":{}}',
+        ]
+    )
+    monkeypatch.setattr(intent_llm, "client", model)
+    session_store.clear()
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/chat",
+            json={
+                "sessionId": "api-recovery",
+                "currentUserText": "订单号 ORD202405010001，我要退款",
+            },
+        )
+        assert first.status_code == 200
+
+        first_unknown = client.post(
+            "/api/chat",
+            json={"sessionId": "api-recovery", "currentUserText": "adfadfadf"},
+        )
+        second_unknown = client.post(
+            "/api/chat",
+            json={"sessionId": "api-recovery", "currentUserText": "adfadfadfasdfa"},
+        )
+        third_unknown = client.post(
+            "/api/chat",
+            json={"sessionId": "api-recovery", "currentUserText": "还是乱码"},
+        )
+
+        assert first_unknown.json()["out"] == "CHAT"
+        assert second_unknown.json()["out"] == "CHAT"
+        assert third_unknown.json()["out"] == "HUMAN"
+        assert third_unknown.json()["data"] == {
+            "unrecognized_count": 3,
+            "conversation_status": "HANDOFF_PENDING",
+            "handoff_reason": "CONSECUTIVE_UNRECOGNIZED",
+        }
+
+        stored = session_store.get("api-recovery")
+        assert stored.unrecognized_count == 3
+        assert stored.conversation_status == "HANDOFF_PENDING"
+        assert stored.plugin_state == "CONFIRM_REFUND"
+
+        waiting = client.post(
+            "/api/chat",
+            json={"sessionId": "api-recovery", "currentUserText": "喂"},
+        )
+        assert waiting.json()["out"] == "HUMAN"
+        assert len(model.calls) == 5
+
+
 def test_openapi_uses_new_camel_case_request_fields() -> None:
     with TestClient(app) as client:
         schema = client.get("/openapi.json").json()

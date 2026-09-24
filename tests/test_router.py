@@ -5,7 +5,7 @@ import pytest
 from app.engine import graph
 from app.engine.llm import TASK_ROUTER_PROMPT, IntentLLM, RouteDecision
 from app.engine.loader import PluginConfigError, plugin_loader
-from app.engine.route_tasks import render_route_task_options
+from app.engine.route_tasks import ROUTE_TASKS, render_route_task_options
 from app.integrations.llm_api import LLMAPIError
 
 
@@ -40,6 +40,8 @@ def test_task_router_uses_model_json_and_last_assistant_context() -> None:
 
 def test_router_prompt_uses_shared_task_definitions() -> None:
     assert f'"task": "{render_route_task_options()}"' in TASK_ROUTER_PROMPT
+    assert "HUMAN" in ROUTE_TASKS
+    assert "TRANSFER_HUMAN" not in ROUTE_TASKS
 
 
 def test_missing_model_does_not_guess_route_from_keywords() -> None:

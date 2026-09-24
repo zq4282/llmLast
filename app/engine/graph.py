@@ -7,12 +7,28 @@ from langgraph.graph import END, START, StateGraph
 from app.engine.action_result import action_failure
 from app.engine.llm import intent_llm
 from app.engine.loader import plugin_loader
+from app.engine.outputs import DialogueOutput
+from app.engine.recovery import (
+    ACTIVE_HANDOFF_STATUSES,
+    SYSTEM_FALLBACKS,
+    recovery_decision,
+)
 from app.engine.render import render_template
 from app.engine.state import ChatState
 
 
 def router(state: ChatState) -> dict[str, Any]:
     """首次由模型选插件；锁定后只读共享状态，不再调用顶层 Router 模型。"""
+
+    if state.get("conversation_status", "BOT") in ACTIVE_HANDOFF_STATUSES:
+        return {
+            "business": state.get("business") or "system",
+            "intent": "human",
+            "intent_confidence": 1.0,
+            "slots": {},
+            "skip_understanding": True,
+            "error": None,
+        }
 
     route_task = state.get("route_task")
     if state.get("route_locked") and route_task and route_task != "UNKNOWN":
@@ -27,22 +43,39 @@ def router(state: ChatState) -> dict[str, Any]:
             "route_task": route_task,
             "route_confidence": state.get("route_confidence"),
             "route_locked": True,
+            "skip_understanding": False,
             "error": None,
         }
 
     decision = intent_llm.classify_route(state["message"], state.get("history", []))
+    if decision.task in {"UNKNOWN", DialogueOutput.HUMAN.value}:
+        return {
+            "business": state.get("business") or "system",
+            "route_task": decision.task,
+            "route_confidence": decision.confidence,
+            "route_locked": decision.task == DialogueOutput.HUMAN.value,
+            "intent": "human" if decision.task == DialogueOutput.HUMAN.value else "unknown",
+            "intent_confidence": decision.confidence,
+            "slots": {},
+            "skip_understanding": True,
+            "error": None,
+        }
     plugin = plugin_loader.get_by_route_task(decision.task)
     return {
         "business": plugin.name,
         "route_task": decision.task,
         "route_confidence": decision.confidence,
         "route_locked": decision.task != "UNKNOWN",
+        "skip_understanding": False,
         "error": None,
     }
 
 
 def understand(state: ChatState) -> dict[str, Any]:
     """使用已选插件的 prompt 识别插件内意图并抽取槽位。"""
+
+    if state.get("skip_understanding"):
+        return {}
 
     plugin = plugin_loader.get(state["business"])
     plugin_state = state.get("plugin_state")
@@ -67,6 +100,10 @@ def understand(state: ChatState) -> dict[str, Any]:
 def decide(state: ChatState) -> dict[str, Any]:
     """根据 plugin_state + intent 查询插件动作表。"""
 
+    recovery = recovery_decision(dict(state))
+    if recovery is not None:
+        return recovery
+
     plugin = plugin_loader.get(state["business"])
     plugin_state = state.get("plugin_state", plugin.initial_state)
     if plugin_state in plugin.terminal_states:
@@ -74,27 +111,38 @@ def decide(state: ChatState) -> dict[str, Any]:
             "action": "none",
             "reply_key": "end",
             "next_plugin_state": plugin_state,
-            "out": "END",
+            "out": DialogueOutput.END,
             "use_fallback": True,
+            "use_system_fallback": False,
+            "unrecognized_count": 0,
+            "conversation_status": "ENDED",
+            "handoff_reason": None,
         }
 
     transition = plugin.transition_for(plugin_state, state["intent"])
     if transition is None:
-        fallback_key = state["intent"] if state["intent"] in plugin.fallbacks else "unknown"
-        output = "HUMAN" if state["intent"] == "human" else "CHAT"
         return {
             "action": "none",
-            "reply_key": fallback_key,
+            "reply_key": "unsupported_intent",
             "next_plugin_state": plugin_state,
-            "out": output,
+            "out": DialogueOutput.CHAT,
             "use_fallback": True,
+            "use_system_fallback": True,
+            "unrecognized_count": 0,
+            "conversation_status": "BOT",
+            "handoff_reason": None,
         }
+    next_status = "ENDED" if transition.out == DialogueOutput.END else "BOT"
     return {
         "action": transition.action,
         "reply_key": transition.reply,
         "next_plugin_state": transition.next_state,
         "out": transition.out,
         "use_fallback": False,
+        "use_system_fallback": False,
+        "unrecognized_count": 0,
+        "conversation_status": next_status,
+        "handoff_reason": None,
     }
 
 
@@ -115,11 +163,15 @@ def run_action(state: ChatState) -> dict[str, Any]:
 def reply(state: ChatState) -> dict[str, Any]:
     """渲染插件话术，合并业务结果，并推进插件状态。"""
 
-    plugin = plugin_loader.get(state["business"])
     result = state.get("action_result", {})
-    transition = plugin.transition_for(
-        state.get("plugin_state", plugin.initial_state),
-        state.get("intent", "unknown"),
+    plugin = None if state.get("use_system_fallback") else plugin_loader.get(state["business"])
+    transition = (
+        plugin.transition_for(
+            state.get("plugin_state", plugin.initial_state),
+            state.get("intent", "unknown"),
+        )
+        if plugin
+        else None
     )
     if not result.get("ok", True):
         error_code = str(result.get("error", "unknown"))
@@ -133,20 +185,29 @@ def reply(state: ChatState) -> dict[str, Any]:
             out = error_transition.out
         else:
             # 当前 action 未声明该错误码时，才进入插件级全局兜底。
+            assert plugin is not None
             template = plugin.fallbacks.get(
                 error_code,
                 plugin.fallbacks.get("unknown", "处理失败，请重试。"),
             )
             next_plugin_state = state.get("plugin_state", plugin.initial_state)
-            out = "CHAT"
+            out = DialogueOutput.CHAT
     else:
         reply_key = state.get("reply_key", "unknown")
-        if state.get("use_fallback"):
+        if state.get("use_system_fallback"):
+            template = SYSTEM_FALLBACKS.get(reply_key, SYSTEM_FALLBACKS["unknown_first"])
+        elif state.get("use_fallback"):
+            assert plugin is not None
             template = plugin.fallbacks.get(reply_key, plugin.fallbacks.get("unknown", ""))
         else:
+            assert plugin is not None
             template = plugin.templates.get(reply_key, plugin.fallbacks.get("unknown", ""))
-        next_plugin_state = state.get("next_plugin_state", state.get("plugin_state", plugin.initial_state))
-        out = state.get("out", "CHAT")
+        default_plugin_state = plugin.initial_state if plugin else state.get("plugin_state")
+        next_plugin_state = state.get(
+            "next_plugin_state",
+            state.get("plugin_state", default_plugin_state),
+        )
+        out: DialogueOutput = state.get("out", DialogueOutput.CHAT)
     values = {**state.get("context", {}), **state.get("slots", {}), **result}
     if result.get("ok", True):
         context = {
@@ -162,6 +223,10 @@ def reply(state: ChatState) -> dict[str, Any]:
         "plugin_state": next_plugin_state,
         "context": context,
         "out": out,
+        "unrecognized_count": state.get("unrecognized_count", 0),
+        "conversation_status": state.get("conversation_status", "BOT"),
+        "handoff_reason": state.get("handoff_reason"),
+        "handoff_id": state.get("handoff_id"),
     }
 
 

@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.chat import router as chat_router
 from app.engine.graph import get_graph
+from app.session.store import session_store
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -17,7 +18,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # 启动时完成 YAML 校验、handler 图构建，避免首个请求才暴露配置错误。
+    # 启动时完成 Redis 连通性和 YAML 校验，避免首个请求才暴露配置错误。
+    session_store.ping()
     get_graph()
     yield
 
