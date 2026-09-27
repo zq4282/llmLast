@@ -200,8 +200,7 @@ async function sendMessage(message) {
       time: requestTime,
     });
     if (TERMINAL_OUTPUTS.has(payload.out)) {
-      // 保留终态回复供查看；锁定输入，只有显式新建会话后才能继续发送。
-      state.history = [];
+      // 保留全部历史及终态回复；锁定输入，显式新建会话后再继续发送。
       setTerminal(true);
     }
     updateInspector(payload, elapsed);

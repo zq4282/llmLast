@@ -1,0 +1,186 @@
+# 公共流程配置；场景解释和时效在 scenarios 下独立维护。
+name: business_inquiry
+route_task: BUSINESS_QA
+global_handlers:
+  other:
+    enabled: false
+states:
+- IDLE
+- ASK_ORDER_INFO
+- RETRY_ORDER_INFO
+- SELECT_ORDER
+- WAIT_REQUEST
+- END
+terminal_states:
+- END
+prompt_file: prompt.md
+recovery:
+  unknown:
+  - reply: clarify
+    out: CHAT
+  - reply: handoff
+    out: HUMAN
+  unsupported:
+  - reply: clarify
+    out: CHAT
+  - reply: handoff
+    out: HUMAN
+
+# 共用查询错误分支使用 YAML 锚点，统一调整无需逐条修改。
+actions:
+- {state: IDLE, intent: needs_handling, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: IDLE, intent: unable_to_provide, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: IDLE, intent: end, do: none, reply: end, next: END, out: END}
+- state: IDLE
+  intent: charge_dispute
+  do: query_order
+  reply: explained
+  next: WAIT_REQUEST
+  out: CHAT
+  on_error: &initial_query_errors
+    missing_order_query:
+      reply: ask_order_info
+      next: ASK_ORDER_INFO
+      out: CHAT
+    order_not_found:
+      reply: ask_order_info
+      next: ASK_ORDER_INFO
+      out: CHAT
+    invalid_query:
+      reply: ask_order_info
+      next: ASK_ORDER_INFO
+      out: CHAT
+    multiple_orders:
+      reply: candidates
+      next: SELECT_ORDER
+      out: CHAT
+    missing_scenario:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+    query_unavailable:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+    internal_error:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+- {state: IDLE, intent: refund_progress, do: query_order, reply: explained, next: WAIT_REQUEST, out: CHAT, on_error: *initial_query_errors}
+- {state: IDLE, intent: scan_confusion, do: query_order, reply: explained, next: WAIT_REQUEST, out: CHAT, on_error: *initial_query_errors}
+- {state: IDLE, intent: provide_info, do: query_order, reply: explained, next: WAIT_REQUEST, out: CHAT, on_error: *initial_query_errors}
+- {state: ASK_ORDER_INFO, intent: needs_handling, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: ASK_ORDER_INFO, intent: unable_to_provide, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: ASK_ORDER_INFO, intent: end, do: none, reply: end, next: END, out: END}
+- {state: ASK_ORDER_INFO, intent: charge_dispute, do: none, reply: continue_info, next: ASK_ORDER_INFO, out: CHAT}
+- {state: ASK_ORDER_INFO, intent: refund_progress, do: none, reply: continue_info, next: ASK_ORDER_INFO, out: CHAT}
+- {state: ASK_ORDER_INFO, intent: scan_confusion, do: none, reply: continue_info, next: ASK_ORDER_INFO, out: CHAT}
+- state: ASK_ORDER_INFO
+  intent: provide_info
+  do: query_order
+  reply: explained
+  next: WAIT_REQUEST
+  out: CHAT
+  on_error: &retry_query_errors
+    missing_order_query:
+      reply: retry_order_info
+      next: RETRY_ORDER_INFO
+      out: CHAT
+    order_not_found:
+      reply: retry_order_info
+      next: RETRY_ORDER_INFO
+      out: CHAT
+    invalid_query:
+      reply: retry_order_info
+      next: RETRY_ORDER_INFO
+      out: CHAT
+    multiple_orders:
+      reply: candidates
+      next: SELECT_ORDER
+      out: CHAT
+    missing_scenario:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+    query_unavailable:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+    internal_error:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+- {state: RETRY_ORDER_INFO, intent: needs_handling, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: RETRY_ORDER_INFO, intent: unable_to_provide, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: RETRY_ORDER_INFO, intent: end, do: none, reply: end, next: END, out: END}
+- {state: RETRY_ORDER_INFO, intent: charge_dispute, do: none, reply: continue_info, next: RETRY_ORDER_INFO, out: CHAT}
+- {state: RETRY_ORDER_INFO, intent: refund_progress, do: none, reply: continue_info, next: RETRY_ORDER_INFO, out: CHAT}
+- {state: RETRY_ORDER_INFO, intent: scan_confusion, do: none, reply: continue_info, next: RETRY_ORDER_INFO, out: CHAT}
+- state: RETRY_ORDER_INFO
+  intent: provide_info
+  do: query_order
+  reply: explained
+  next: WAIT_REQUEST
+  out: CHAT
+  on_error: &last_query_errors
+    missing_order_query:
+      reply: lookup_handoff
+      next: END
+      out: HUMAN
+    order_not_found:
+      reply: lookup_handoff
+      next: END
+      out: HUMAN
+    invalid_query:
+      reply: lookup_handoff
+      next: END
+      out: HUMAN
+    multiple_orders:
+      reply: candidates
+      next: SELECT_ORDER
+      out: CHAT
+    missing_scenario:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+    query_unavailable:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+    internal_error:
+      reply: query_handoff
+      next: END
+      out: HUMAN
+- {state: SELECT_ORDER, intent: needs_handling, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: SELECT_ORDER, intent: unable_to_provide, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: SELECT_ORDER, intent: end, do: none, reply: end, next: END, out: END}
+- {state: SELECT_ORDER, intent: charge_dispute, do: none, reply: select_order, next: SELECT_ORDER, out: CHAT}
+- {state: SELECT_ORDER, intent: refund_progress, do: none, reply: select_order, next: SELECT_ORDER, out: CHAT}
+- {state: SELECT_ORDER, intent: scan_confusion, do: none, reply: select_order, next: SELECT_ORDER, out: CHAT}
+- {state: SELECT_ORDER, intent: provide_info, do: query_order, reply: explained, next: WAIT_REQUEST, out: CHAT, on_error: *retry_query_errors}
+- {state: WAIT_REQUEST, intent: needs_handling, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: WAIT_REQUEST, intent: unable_to_provide, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: WAIT_REQUEST, intent: end, do: none, reply: end, next: END, out: END}
+- {state: WAIT_REQUEST, intent: charge_dispute, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: WAIT_REQUEST, intent: refund_progress, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: WAIT_REQUEST, intent: scan_confusion, do: none, reply: handoff, next: END, out: HUMAN}
+- {state: WAIT_REQUEST, intent: provide_info, do: none, reply: handoff, next: END, out: HUMAN}
+
+templates:
+  explained: '{inquiry_reply}'
+  ask_order_info: 暂未定位到您要核查的订单，请提供下单手机号或订单号，我再为您查询。
+  continue_info: 请提供下单手机号或订单号；若您需要进一步处理，我可以为您转人工。
+  retry_order_info: 根据您提供的信息仍未定位到目标订单，请最后核对一次手机号或订单号；若仍无法查询，我将为您转人工核实。
+  candidates: 查到多笔候选记录：{candidates}。请提供您要核查的订单号，或回复“转人工”。
+  select_order: 请提供上一条候选记录中的目标订单号，或回复“转人工”。
+  lookup_handoff: 仍未定位到目标订单，很抱歉，正在为您转接人工客服核实，请稍候。
+  query_handoff: 当前查询暂时无法完成，很抱歉，正在为您转接人工客服核实，请稍候。
+  handoff: 了解您的诉求，给您带来困扰，很抱歉，正在为您转接人工客服继续处理，请稍候。
+  end: 好的，本次查询服务已结束，感谢您的来电。
+fallbacks:
+  clarify: 请问您是否还有需要处理的诉求？需要处理请说明或回复“转人工”，没有其他诉求请回复“没有了”。
+  handoff: 暂时无法确认您的诉求，很抱歉，正在为您转接人工客服进一步核实，请稍候。
+  human_handoff: 正在为您转接人工客服继续处理，请稍候。
+  human: 正在为您转接人工客服继续处理，请稍候。
+  unknown: 抱歉，请说明您是否还需要处理，或回复“转人工”。
+  end: 本次查询服务已结束，感谢您的来电。

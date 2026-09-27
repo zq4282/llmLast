@@ -1,0 +1,4 @@
+summary: 查到这笔{amount}元对应{product}，订购时间为{subscription_time}，订购渠道为{subscription_channel}。扫码关联记录：{scan_relation}。
+arrangement: 如需核实扫码与订购的关系，我马上为您转人工处理。{timeframe}
+apology: 给您带来困扰，很抱歉。
+question: 请问您还有需要处理的诉求吗？

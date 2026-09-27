@@ -13,6 +13,7 @@ from app.engine.runtime import DialogueEngine
 def test_all_plugins_are_loaded() -> None:
     plugins = plugin_loader.load_all(force=True)
     assert set(plugins) == {
+        "business_inquiry",
         "human",
         "other",
         "refund",

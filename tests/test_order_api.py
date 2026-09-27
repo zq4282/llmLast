@@ -29,7 +29,7 @@ def test_query_order_accepts_dynamic_phone_and_returns_latest_order() -> None:
     )
 
     assert result["ok"] is True
-    assert result["order_no"] == "ORD202405040004"
+    assert result["order_no"] == "ORD202405040008"
 
 
 def test_query_order_requires_at_least_one_query_parameter() -> None:
@@ -269,3 +269,19 @@ def test_phone_query_returns_latest_matching_order_after_plugin_filter(
 
     assert result["ok"] is True
     assert result["order_no"] == "ELIGIBLE_ORDER"
+
+
+@pytest.mark.parametrize("business", ["refund", "unsubscribe", "refund_unsubscribe"])
+def test_phone_order_can_be_queried_again_by_saved_order_number(business: str) -> None:
+    first = query_order({"business": business, "call_info": {"caller": "13800138000"}})
+    assert first["ok"] is True
+    repeated = query_order({"business": business, "context": first})
+    assert repeated == first
+
+
+@pytest.mark.parametrize("order_no", ["ORD202405030009", "ORD202405040008"])
+def test_phone_and_order_number_queries_use_the_same_order_record(order_no: str) -> None:
+    phone_order = order_lookup._PHONE_ORDERS["13800138000"][order_no]
+    assert phone_order["order_no"] == order_no
+    queried = query_order({"business": "refund", "slots": {"order_no": order_no}})
+    assert queried == order_lookup._normalize_order(phone_order)

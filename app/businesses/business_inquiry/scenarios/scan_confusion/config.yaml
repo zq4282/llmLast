@@ -1,0 +1,9 @@
+# 业务确认固定时效后，仅修改本场景 timeframe；不得复制其他场景时效。
+id: scan_confusion
+timeframe: 具体渠道核查处理时效需要人工客服确认。
+facts:
+  product: 产品待核实
+  amount: 金额待核实
+  subscription_time: 订购时间待核实
+  subscription_channel: 订购渠道待核实
+  scan_relation: 暂未提供扫码与订购的关联记录

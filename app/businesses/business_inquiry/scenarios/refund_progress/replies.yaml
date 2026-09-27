@@ -1,0 +1,4 @@
+summary: 查到订单对应{product}，订购渠道为{subscription_channel}。退款状态为{refund_status}，退款渠道为{refund_channel}，申请时间为{refund_request_time}，退款完成记录为{refund_time}。失败原因记录：{refund_fail_reason}。
+arrangement: 如需继续核实退款进度，我马上为您转人工处理。{timeframe}
+apology: 给您带来困扰，很抱歉。
+question: 请问您还有需要处理的诉求吗？

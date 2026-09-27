@@ -7,7 +7,7 @@
 router → understand → decide → run_action → reply
 ```
 
-退款、退订、退款并退订和转人工流程均为 YAML workflow 插件。新增业务时在
+退款、退订、退款并退订、业务查询和转人工流程均为 YAML workflow 插件。新增业务时在
 `route_tasks.py` 登记顶层 Task，并在 `app/businesses/` 下增加 `plugin.yaml`、
 `prompt.md` 与 `handlers.py`；共享流程图无需修改。
 
@@ -64,6 +64,8 @@ state_policies:
 会话通过 `flows` 保存流程快照，状态包含 `ACTIVE`、`SUSPENDED`、`COMPLETED`、
 `CANCELLED` 和 `SUPERSEDED`。兼容字段 `business/plugin_state/context` 始终投影当前
 ACTIVE 流程，旧客户端无需修改。
+
+同一会话的对话历史完整保存，不按轮数裁剪；顶层路由和业务意图识别均收到完整历史。
 
 ## 订单查询失败后的处理
 
@@ -124,6 +126,39 @@ uv run pytest
 
 `plugin.yaml` 中 `do` 配置的业务动作统一由同插件目录的 `handlers.py` 暴露。
 共用能力放在 `app/services/`，生产环境可在这些服务中接入真实接口。
+
+## 业务查询：扣费质疑、退款进度与扫码混淆
+
+`BUSINESS_QA` 对应 `app/businesses/business_inquiry/`，三个场景共用查询和询问诉求的
+状态流程。查询后解释订单及订购记录、说明人工处理安排和时效、道歉安抚，再询问诉求；
+有后续诉求返回 `HUMAN`，明确没有诉求返回 `END`。返回 `HUMAN` 后当前机器人流程结束，
+后续人工处理由其他服务负责。本插件不执行退款、退订、催办或人工处理跟踪。
+
+三个场景独立保存在 `scenarios/charge_dispute/`、`scenarios/refund_progress/` 和
+`scenarios/scan_confusion/`：
+
+- `config.yaml`：事实字段的缺失说明与场景固定时效。业务确认时效后仅修改本场景的
+  `timeframe`；目前未提供具体数值，默认提示由人工确认，不编造处理天数。
+- `replies.yaml`：查询说明、处理安排、道歉及诉求询问；只使用本场景声明的事实字段。
+- `prompt.md`：本场景追问理解规则，成功查询后写入上下文供后续识别使用。
+
+公共状态表在 `plugin.yaml`，重复查询的错误分支使用 YAML 锚点共用；维护单个场景的话术
+和时效不需要修改公共流程。场景配置读取时验证 ID、字段、话术变量和必要配置，不借用
+其他场景配置。共享流程、查询服务或协议发生修改时，执行三个场景和现有办理流程回归。
+
+核查查询在 `app/services/order_inquiry.py`，独立于现有办理订单筛选，能够读取已退款、
+退款失败及支付失败的订单；手机号查询返回多笔候选时要求确认，不自动取最新一笔。
+可通过用户明确提供的金额缩小候选范围。查询信息补充失败采用有限核对，接口异常直接
+转人工，不当作查无订单。未查到订购渠道或退款去向时明确说明，不能用支付渠道替代
+退款渠道，也不能凭无订单认定用户错打热线。
+
+`find_orders(order_no=..., phone=...)` 是业务接口接入点，目前读取项目已有的演示数据。
+接入真实业务时返回原始订单列表，字段映射由 `normalize_order` 统一维护；场景逻辑无需
+修改。退款及渠道补充字段包括 `subscriptionTime`、`subscriptionChannel`、`scanRelation`、
+`refundChannel`、`refundRequestTime` 等，接口缺失字段按各场景配置说明。
+
+设计边界见 `docs/business-inquiry-design-draft.md`，分支和隔离验证见
+`tests/test_business_inquiry.py`。
 
 ## Redis 会话状态
 

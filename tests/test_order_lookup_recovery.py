@@ -190,7 +190,7 @@ def test_last_order_lookup_can_recover_using_phone(
     assert recovered["plugin_state"] == confirm_state
     assert recovered["out"] == "CHAT"
     assert recovered["action_result"]["ok"] is True
-    assert recovered["context"]["order_no"] == "ORD202405040004"
+    assert recovered["context"]["order_no"] == "ORD202405040008"
     assert recovered["flows"][-1]["status"] == "ACTIVE"
     assert recovered["handoff_reason"] is None
 

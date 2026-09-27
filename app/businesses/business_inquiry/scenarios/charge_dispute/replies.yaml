@@ -1,0 +1,4 @@
+summary: 查到这笔{amount}元对应{product}，支付状态为{pay_status}，扣款时间为{pay_time}。订购记录：{subscription_time}，{subscription_channel}。
+arrangement: 如需进一步处理，我马上为您转人工核实。{timeframe}
+apology: 给您带来困扰，很抱歉。
+question: 请问您还有需要处理的诉求吗？

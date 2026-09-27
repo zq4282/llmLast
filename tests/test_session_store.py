@@ -1,6 +1,22 @@
-import fakeredis
+import json
+from dataclasses import asdict
 
-from app.session.store import RedisSessionStore
+import fakeredis
+import pytest
+
+from app.session.store import MemorySessionStore, RedisSessionStore
+
+
+def _flow(context: dict, *, unrecognized_count: int = 0) -> dict:
+    return {
+        "flow_id": "flow-refund",
+        "business": "refund",
+        "plugin_state": "CONFIRM_REFUND",
+        "status": "ACTIVE",
+        "context": context,
+        "unrecognized_count": unrecognized_count,
+        "completed_actions": [],
+    }
 
 
 def test_redis_store_round_trips_state_and_refreshes_ttl() -> None:
@@ -26,13 +42,11 @@ def test_redis_store_round_trips_state_and_refreshes_ttl() -> None:
     store.save(
         "session-1",
         tenant_id=7,
-        business="refund",
-        plugin_state="CONFIRM_REFUND",
         call_info={"caller": "13800138000"},
-        context={"order_no": "ORD202405010001", "amount": 299.0},
+        flows=[_flow({"order_no": "ORD202405010001", "amount": 299.0}, unrecognized_count=2)],
+        active_flow_id="flow-refund",
         user_message="adfadfadf",
         assistant_message="请换一种说法",
-        unrecognized_count=2,
     )
 
     restored = store.get("session-1", tenant_id=7)
@@ -54,18 +68,18 @@ def test_redis_store_isolates_tenants_with_same_session_id() -> None:
     store.save(
         "same-id",
         tenant_id=1,
-        business="refund",
         call_info={},
-        context={"tenant": 1},
+        flows=[_flow({"tenant": 1})],
+        active_flow_id="flow-refund",
         user_message="一",
         assistant_message="一",
     )
     store.save(
         "same-id",
         tenant_id=2,
-        business="refund",
         call_info={},
-        context={"tenant": 2},
+        flows=[_flow({"tenant": 2})],
+        active_flow_id="flow-refund",
         user_message="二",
         assistant_message="二",
     )
@@ -102,10 +116,7 @@ def test_redis_store_round_trips_flow_stack_and_pending_switch() -> None:
 
     store.save(
         "flow-session",
-        business="refund",
-        plugin_state="CONFIRM_REFUND",
         call_info={},
-        context=flows[0]["context"],
         user_message="我还要退订",
         assistant_message="是否切换？",
         flows=flows,
@@ -119,3 +130,79 @@ def test_redis_store_round_trips_flow_stack_and_pending_switch() -> None:
     assert restored.pending_switch == pending
     assert restored.business == "refund"
     assert restored.plugin_state == "CONFIRM_REFUND"
+
+
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+def test_session_stores_only_flows_and_derives_current_business(backend: str) -> None:
+    client = fakeredis.FakeRedis(decode_responses=True)
+    store = MemorySessionStore() if backend == "memory" else RedisSessionStore(client=client)
+    flows = [_flow({"order_no": "123"}, unrecognized_count=2)]
+    store.save(
+        "single-source", call_info={}, flows=flows, active_flow_id="flow-refund",
+        user_message="退款", assistant_message="请确认",
+    )
+    flows[0]["context"]["order_no"] = "changed"
+    restored = store.get("single-source")
+    assert restored.context == {"order_no": "123"}
+    assert restored.unrecognized_count == 2
+    assert not {"business", "plugin_state", "context", "unrecognized_count"} & asdict(restored).keys()
+    if backend == "redis":
+        assert not {"business", "plugin_state", "context", "unrecognized_count"} & client.hgetall(
+            "llmlast:session:1002:single-source"
+        ).keys()
+
+
+def test_redis_store_migrates_legacy_single_flow_and_cleans_duplicate_fields() -> None:
+    client = fakeredis.FakeRedis(decode_responses=True)
+    store = RedisSessionStore(client=client)
+    key = "llmlast:session:1002:legacy"
+    client.hset(key, mapping={
+        "business": "refund", "plugin_state": "CONFIRM_REFUND",
+        "context": json.dumps({"order_no": "123"}), "unrecognized_count": "2",
+        "history": json.dumps([{"role": "user", "content": "退款"}]),
+    })
+    restored = store.get("legacy")
+    assert restored.business == "refund"
+    assert restored.plugin_state == "CONFIRM_REFUND"
+    assert restored.context == {"order_no": "123"}
+    assert restored.unrecognized_count == 2
+    assert restored.active_flow_id == restored.flows[0]["flow_id"]
+    store.save(
+        "legacy", call_info={}, flows=restored.flows, active_flow_id=restored.active_flow_id,
+        user_message="确认", assistant_message="已处理",
+    )
+    assert store.get("legacy").flows == restored.flows
+    assert len(store.get("legacy").history) == 3
+    assert not {"business", "plugin_state", "context", "unrecognized_count"} & client.hgetall(key).keys()
+
+
+@pytest.mark.parametrize("flows", [[], [{**_flow({}), "status": "COMPLETED"}]])
+def test_redis_store_does_not_restore_stale_top_level_business(flows: list[dict]) -> None:
+    client = fakeredis.FakeRedis(decode_responses=True)
+    store = RedisSessionStore(client=client)
+    client.hset("llmlast:session:1002:completed", mapping={
+        "flows": json.dumps(flows), "active_flow_id": "",
+        "business": "refund", "plugin_state": "CONFIRM_REFUND",
+        "context": "invalid legacy JSON", "unrecognized_count": "invalid legacy count",
+    })
+    restored = store.get("completed")
+    assert restored.flows == flows
+    assert restored.business is None
+    assert restored.context == {}
+
+
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+def test_history_keeps_every_turn_beyond_previous_limit(backend: str) -> None:
+    client = fakeredis.FakeRedis(decode_responses=True)
+    store = MemorySessionStore() if backend == "memory" else RedisSessionStore(client=client)
+    expected = []
+    for turn in range(25):
+        store.save(
+            "full-history", call_info={}, flows=[],
+            user_message=f"用户问题{turn}", assistant_message=f"客服回复{turn}",
+        )
+        expected.extend([
+            {"role": "user", "content": f"用户问题{turn}"},
+            {"role": "assistant", "content": f"客服回复{turn}"},
+        ])
+    assert store.get("full-history").history == expected

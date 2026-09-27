@@ -1,3 +1,5 @@
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.engine.llm import intent_llm
@@ -183,3 +185,70 @@ def test_frontend_is_served() -> None:
     assert "CALL_001" not in page.text
     assert tokens.status_code == 200
     assert "--color-accent" in tokens.text
+
+
+@pytest.mark.parametrize("chitchat_rounds", [0, 12])
+def test_cancelled_refund_keeps_full_history_and_can_restart_after_many_turns(monkeypatch, chitchat_rounds) -> None:
+    # 模拟识别结果，验证查询、状态和持久化；此测试不评估真实模型的语义准确率。
+    responses = [
+        '{"task":"REFUND","confidence":0.97}',
+        '{"intent":"refund_request","confidence":0.98,"slots":{}}',
+        '{"intent":"unknown","confidence":0.3,"slots":{}}',
+        '{"intent":"unknown","confidence":0.3,"slots":{}}',
+        '{"intent":"negate","confidence":0.98,"slots":{}}',
+    ]
+    for _ in range(chitchat_rounds):
+        responses.extend([
+            '{"intent":"other","confidence":0.98,"slots":{}}',
+            '{"decision":"ANSWER","intent":"chitchat","reply":"您好，有什么可以帮您？"}',
+        ])
+    responses.extend([
+        '{"intent":"refund_request","confidence":0.98,"slots":{}}',
+        '{"intent":"affirm","confidence":0.98,"slots":{}}',
+    ])
+    model = SequenceClient(responses)
+    monkeypatch.setattr(intent_llm, "client", model)
+    session_store.clear()
+    session_id = f"refund-long-chat-{chitchat_rounds}"
+    with TestClient(app) as client:
+        def send(message):
+            response = client.post("/api/chat", json={"sessionId": session_id, "currentUserText": message})
+            assert response.status_code == 200
+            return response.json()
+
+        first = send("为啥扣我23元，我要退款")
+        assert "19.9元" in first["reply"]
+        first_flow = session_store.get(session_id).active_flow_id
+        send("啥玩意")
+        send("我也不知道呢")
+        cancelled = send("不退款")
+        assert "已取消退款" in cancelled["reply"]
+        saved = session_store.get(session_id)
+        assert saved.plugin_state == "IDLE"
+        assert saved.unrecognized_count == 0
+        order_no = saved.context["order_no"]
+
+        for _ in range(chitchat_rounds):
+            send("你好")
+            saved = session_store.get(session_id)
+            assert saved.active_flow_id == first_flow
+            assert saved.plugin_state == "IDLE"
+            assert saved.context["order_no"] == order_no
+        assert saved.history[0]["content"] == "为啥扣我23元，我要退款"
+        assert len(saved.history) == 2 * (4 + chitchat_rounds)
+
+        restarted = send("我要退款")
+        assert restarted["intent"] == "refund_request"
+        assert restarted["action"] == "query_order"
+        assert "19.9元" in restarted["reply"]
+        assert "是否需要为您申请退款" in restarted["reply"]
+        saved = session_store.get(session_id)
+        assert saved.plugin_state == "CONFIRM_REFUND"
+        assert saved.context["order_no"] == order_no
+        # 对话轮数增加后，模型仍收到原始问题和独立保存的订单上下文。
+        assert order_no in model.calls[-1][0]["content"]
+        assert "用户：为啥扣我23元，我要退款" in model.calls[-1][0]["content"]
+        confirmed = send("确认退款")
+        assert confirmed["out"] == "REFUND"
+        assert confirmed["data"]["order_no"] == order_no
+        assert model.responses == []

@@ -120,7 +120,7 @@ def test_refund_asks_for_order_info_and_continues_with_phone(monkeypatch) -> Non
         }
     )
     assert second["action"] == "query_order"
-    assert second["action_result"]["order_no"] == "ORD202405040004"
+    assert second["action_result"]["order_no"] == "ORD202405040008"
     assert second["plugin_state"] == "CONFIRM_REFUND"
     assert "是否需要为您申请退款" in second["reply"]
 
@@ -171,7 +171,7 @@ def test_refund_queries_order_with_caller_from_call_info(monkeypatch) -> None:
         }
     )
 
-    assert result["action_result"]["order_no"] == "ORD202405040004"
+    assert result["action_result"]["order_no"] == "ORD202405040008"
     assert result["plugin_state"] == "CONFIRM_REFUND"
     assert "19.9元" in result["reply"]
 
@@ -218,7 +218,7 @@ def test_refund_gives_one_final_retry_when_supplied_order_is_not_found(monkeypat
         }
     )
     assert recovered["plugin_state"] == "CONFIRM_REFUND"
-    assert recovered["action_result"]["order_no"] == "ORD202405040004"
+    assert recovered["action_result"]["order_no"] == "ORD202405040008"
 
 
 def test_refund_continues_when_user_supplies_order_number(monkeypatch) -> None:

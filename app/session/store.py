@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from threading import RLock
 from time import time
 from typing import Any, Literal, Protocol
+from uuid import uuid4
 
 import redis
 from pydantic import Field
@@ -16,6 +17,10 @@ from redis.exceptions import RedisError
 
 
 _OBSOLETE_SESSION_FIELDS = (
+    "business",
+    "plugin_state",
+    "context",
+    "unrecognized_count",
     "route_task",
     "route_confidence",
     "route_locked",
@@ -31,15 +36,45 @@ class SessionStoreError(RuntimeError):
 
 @dataclass
 class Session:
-    business: str | None = None
-    plugin_state: str | None = None
+    """会话只保存流程快照，当前业务属性均从活动流程读取。"""
+
     call_info: dict[str, str] = field(default_factory=dict)
-    context: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
-    unrecognized_count: int = 0
     flows: list[dict[str, Any]] = field(default_factory=list)
     active_flow_id: str | None = None
     pending_switch: dict[str, Any] | None = None
+
+    # 保留便捷读取入口，但只从当前流程计算，不单独保存业务进度。
+    @property
+    def active_flow(self) -> dict[str, Any] | None:
+        return next(
+            (
+                flow
+                for flow in self.flows
+                if flow.get("flow_id") == self.active_flow_id and flow.get("status") == "ACTIVE"
+            ),
+            None,
+        )
+
+    @property
+    def business(self) -> str | None:
+        active = self.active_flow
+        return str(active["business"]) if active else None
+
+    @property
+    def plugin_state(self) -> str | None:
+        active = self.active_flow
+        return (str(active.get("plugin_state") or "") or None) if active else None
+
+    @property
+    def context(self) -> dict[str, Any]:
+        active = self.active_flow
+        return deepcopy(active.get("context", {})) if active else {}
+
+    @property
+    def unrecognized_count(self) -> int:
+        active = self.active_flow
+        return int(active.get("unrecognized_count", 0)) if active else 0
 
 
 class SessionStore(Protocol):
@@ -51,15 +86,11 @@ class SessionStore(Protocol):
         self,
         session_id: str,
         *,
-        business: str | None,
-        plugin_state: str | None = None,
         call_info: dict[str, str],
-        context: dict[str, Any],
         user_message: str,
         assistant_message: str,
         tenant_id: int = 1002,
-        unrecognized_count: int = 0,
-        flows: list[dict[str, Any]] | None = None,
+        flows: list[dict[str, Any]],
         active_flow_id: str | None = None,
         pending_switch: dict[str, Any] | None = None,
     ) -> None: ...
@@ -70,10 +101,9 @@ class SessionStore(Protocol):
 class MemorySessionStore:
     """单进程测试替身；生产环境不得依赖它共享状态。"""
 
-    def __init__(self, max_history: int = 20) -> None:
+    def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
         self._guard = RLock()
-        self._max_history = max_history
 
     @staticmethod
     def _key(session_id: str, tenant_id: int) -> str:
@@ -93,15 +123,11 @@ class MemorySessionStore:
         self,
         session_id: str,
         *,
-        business: str | None,
-        plugin_state: str | None = None,
         call_info: dict[str, str],
-        context: dict[str, Any],
         user_message: str,
         assistant_message: str,
         tenant_id: int = 1002,
-        unrecognized_count: int = 0,
-        flows: list[dict[str, Any]] | None = None,
+        flows: list[dict[str, Any]],
         active_flow_id: str | None = None,
         pending_switch: dict[str, Any] | None = None,
     ) -> None:
@@ -110,14 +136,9 @@ class MemorySessionStore:
             session = self._sessions.setdefault(key, Session())
             _update_session(
                 session,
-                business=business,
-                plugin_state=plugin_state,
                 call_info=call_info,
-                context=context,
                 user_message=user_message,
                 assistant_message=assistant_message,
-                max_history=self._max_history,
-                unrecognized_count=unrecognized_count,
                 flows=flows,
                 active_flow_id=active_flow_id,
                 pending_switch=pending_switch,
@@ -140,13 +161,11 @@ class RedisSessionStore:
         *,
         key_prefix: str = "llmlast",
         ttl_seconds: int = 86400,
-        max_history: int = 20,
         client: redis.Redis | None = None,
     ) -> None:
         self._client = client or redis.Redis.from_url(url, decode_responses=True)
         self._key_prefix = key_prefix.strip(":")
         self._ttl_seconds = ttl_seconds
-        self._max_history = max_history
 
     def _key(self, session_id: str, tenant_id: int) -> str:
         return f"{self._key_prefix}:session:{tenant_id}:{session_id}"
@@ -159,15 +178,12 @@ class RedisSessionStore:
         if not raw:
             return Session()
         try:
+            flows, active_flow_id = _restore_flows(raw)
             return Session(
-                business=raw.get("business") or None,
-                plugin_state=raw.get("plugin_state") or None,
                 call_info=_json_object(raw.get("call_info")),
-                context=_json_object(raw.get("context")),
                 history=_json_history(raw.get("history")),
-                unrecognized_count=int(raw.get("unrecognized_count", "0")),
-                flows=_json_list(raw.get("flows")),
-                active_flow_id=raw.get("active_flow_id") or None,
+                flows=flows,
+                active_flow_id=active_flow_id,
                 pending_switch=_json_optional_object(raw.get("pending_switch")),
             )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -183,41 +199,28 @@ class RedisSessionStore:
         self,
         session_id: str,
         *,
-        business: str | None,
-        plugin_state: str | None = None,
         call_info: dict[str, str],
-        context: dict[str, Any],
         user_message: str,
         assistant_message: str,
         tenant_id: int = 1002,
-        unrecognized_count: int = 0,
-        flows: list[dict[str, Any]] | None = None,
+        flows: list[dict[str, Any]],
         active_flow_id: str | None = None,
         pending_switch: dict[str, Any] | None = None,
     ) -> None:
         session = self.get(session_id, tenant_id=tenant_id)
         _update_session(
             session,
-            business=business,
-            plugin_state=plugin_state,
             call_info=call_info,
-            context=context,
             user_message=user_message,
             assistant_message=assistant_message,
-            max_history=self._max_history,
-            unrecognized_count=unrecognized_count,
             flows=flows,
             active_flow_id=active_flow_id,
             pending_switch=pending_switch,
         )
         values = asdict(session)
         mapping = {
-            "business": values["business"] or "",
-            "plugin_state": values["plugin_state"] or "",
             "call_info": json.dumps(values["call_info"], ensure_ascii=False),
-            "context": json.dumps(values["context"], ensure_ascii=False),
             "history": json.dumps(values["history"], ensure_ascii=False),
-            "unrecognized_count": str(values["unrecognized_count"]),
             "flows": json.dumps(values["flows"], ensure_ascii=False),
             "active_flow_id": values["active_flow_id"] or "",
             "pending_switch": json.dumps(values["pending_switch"], ensure_ascii=False),
@@ -258,66 +261,62 @@ class SessionSettings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     session_key_prefix: str = "llmlast"
     session_ttl_seconds: int = Field(default=86400, ge=60)
-    session_max_history: int = Field(default=20, ge=2)
 
 
 def build_session_store(settings: SessionSettings | None = None) -> MemorySessionStore | RedisSessionStore:
     settings = settings or SessionSettings()
     if settings.session_store_backend == "memory":
-        return MemorySessionStore(max_history=settings.session_max_history)
+        return MemorySessionStore()
     return RedisSessionStore(
         settings.redis_url,
         key_prefix=settings.session_key_prefix,
         ttl_seconds=settings.session_ttl_seconds,
-        max_history=settings.session_max_history,
     )
 
 
 def _update_session(
     session: Session,
     *,
-    business: str | None,
-    plugin_state: str | None,
     call_info: dict[str, str],
-    context: dict[str, Any],
     user_message: str,
     assistant_message: str,
-    max_history: int,
-    unrecognized_count: int,
-    flows: list[dict[str, Any]] | None,
+    flows: list[dict[str, Any]],
     active_flow_id: str | None,
     pending_switch: dict[str, Any] | None,
 ) -> None:
-    if flows is None:
-        # 兼容仍按单流程调用 SessionStore 的代码。
-        session.business = business
-        session.plugin_state = plugin_state
-        session.context = deepcopy(context)
-        session.unrecognized_count = unrecognized_count
-    else:
-        session.flows = deepcopy(flows)
-        session.active_flow_id = active_flow_id
-        session.pending_switch = deepcopy(pending_switch)
-        active = next(
-            (
-                flow
-                for flow in session.flows
-                if flow.get("flow_id") == active_flow_id and flow.get("status") == "ACTIVE"
-            ),
-            None,
-        )
-        session.business = str(active["business"]) if active else None
-        session.plugin_state = str(active.get("plugin_state") or "") or None if active else None
-        session.context = deepcopy(active.get("context", {})) if active else {}
-        session.unrecognized_count = int(active.get("unrecognized_count", 0)) if active else 0
+    session.flows = deepcopy(flows)
+    session.active_flow_id = active_flow_id
+    session.pending_switch = deepcopy(pending_switch)
     session.call_info = deepcopy(call_info)
+    # 会话内保留全部对话，不按消息数或轮数截断。
     session.history.extend(
         [
             {"role": "user", "content": user_message},
             {"role": "assistant", "content": assistant_message},
         ]
     )
-    session.history = session.history[-max_history:]
+
+
+def _restore_flows(raw: dict[str, str]) -> tuple[list[dict[str, Any]], str | None]:
+    """优先读取流程；只有尚未保存 flows 的旧会话才迁移顶层业务字段。"""
+
+    if "flows" in raw:
+        return _json_list(raw["flows"]), raw.get("active_flow_id") or None
+    business = raw.get("business")
+    if not business:
+        return [], None
+    flow_id = f"flow_{uuid4().hex}"
+    return [
+        {
+            "flow_id": flow_id,
+            "business": business,
+            "plugin_state": raw.get("plugin_state") or "",
+            "status": "ACTIVE",
+            "context": _json_object(raw.get("context")),
+            "unrecognized_count": max(0, int(raw.get("unrecognized_count", "0"))),
+            "completed_actions": [],
+        }
+    ], flow_id
 
 
 def _json_object(value: str | None) -> dict[str, Any]:
